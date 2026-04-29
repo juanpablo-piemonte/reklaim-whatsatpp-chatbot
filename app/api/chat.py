@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
-from app.agent.graph import build_graph
+from app.agent.graph import get_graph
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ def chat_test(body: ChatTestRequest) -> dict:
     """
     logger.info("[/chat/test] phone=%s message=%r", body.phone, body.message)
 
-    graph = build_graph()
+    graph = get_graph()
     result = graph.invoke(
         {
             "messages": [HumanMessage(content=body.message)],

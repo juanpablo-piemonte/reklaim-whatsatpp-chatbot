@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     whatsapp_access_token: str = "dev-access-token"
     whatsapp_phone_number_id: str = "dev-phone-id"
 
-    monolith_internal_url: str = "http://localhost:3000"
-    monolith_internal_token: str = "dev-internal-token"
+    reklaim_api_url: str = "http://localhost:5001"
+    dealers_chatbot_api_key: str = "dev-chatbot-key"
 
     aws_region: str = "us-east-1"
     bedrock_model_id: str = "us.amazon.nova-pro-v1:0"

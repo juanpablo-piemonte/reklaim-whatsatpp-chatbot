@@ -4,18 +4,9 @@ from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)
 
-_graph = None
-
-
-def _get_graph():
-    global _graph
-    if _graph is None:
-        from app.agent.graph import build_graph
-        _graph = build_graph()
-    return _graph
-
 
 async def process_whatsapp_message(message: dict) -> str:
+    from app.agent.graph import get_graph
     from app.services.whatsapp_client import whatsapp_client
 
     dealer_phone: str = message.get("from", "unknown")
@@ -23,7 +14,7 @@ async def process_whatsapp_message(message: dict) -> str:
 
     logger.info("[task] ← from=%s text=%r", dealer_phone, text)
 
-    result = _get_graph().invoke(
+    result = get_graph().invoke(
         {
             "messages": [HumanMessage(content=text)],
             "dealer_phone": dealer_phone,
