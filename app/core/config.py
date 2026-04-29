@@ -1,3 +1,5 @@
+from typing import Optional
+
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,16 +11,7 @@ load_dotenv(override=False)
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore", env_ignore_empty=True)
 
-    redis_url: str = "redis://localhost:6379/0"
-
-    # Derived from redis_url — Celery uses separate logical DBs on the same Redis instance
-    @property
-    def celery_broker_url(self) -> str:
-        return self.redis_url.rsplit("/", 1)[0] + "/1"
-
-    @property
-    def celery_result_backend(self) -> str:
-        return self.redis_url.rsplit("/", 1)[0] + "/2"
+    mysql_url: Optional[str] = None
 
     whatsapp_app_secret: str = "dev-secret"
     whatsapp_verify_token: str = "dev-verify-token"

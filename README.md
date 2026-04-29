@@ -1,22 +1,16 @@
 # reklaim-whatsapp-ai
 
-A standalone Python microservice that powers a WhatsApp chatbot for Reklaim, a luxury goods platform. Dealers send messages via WhatsApp; the service receives them through a Meta webhook, processes each message asynchronously with a LangGraph agent backed by AWS Bedrock (Claude 3.5 Sonnet), and sends replies back through the WhatsApp Cloud API. It integrates with a Rails monolith for business context (purchase orders, prompts) over an internal HTTP API.
+A standalone Python microservice that powers a WhatsApp chatbot for Reklaim, a luxury goods platform. Dealers send messages via WhatsApp; the service receives them through a Meta webhook, processes each message asynchronously with FastAPI BackgroundTasks and a LangGraph agent backed by AWS Bedrock (Claude 3.5 Sonnet), and sends replies back through the WhatsApp Cloud API. It integrates with a Rails monolith for business context (purchase orders, prompts) over an internal HTTP API.
 
 ## Local setup
 
 ```bash
-cp .env.example .env          # fill in your credentials (see comments in the file)
-docker-compose up -d          # start Redis
-pip install -e ".[dev]"
-uvicorn app.api.main:app --reload                         # start FastAPI on port 8000
-celery -A app.worker.celery_app worker --loglevel=info    # start worker (separate terminal)
+cp .env.example .env   # fill in AWS + WhatsApp credentials
+make install
+make run
 ```
 
-Python 3.12 and Docker are required. Create a virtualenv first if you haven't:
-
-```bash
-python3.12 -m venv .venv && source .venv/bin/activate
-```
+Python 3.12 is required.
 
 ## Running tests
 
@@ -24,7 +18,7 @@ python3.12 -m venv .venv && source .venv/bin/activate
 pytest
 ```
 
-No external services are required — Bedrock is mocked via `unittest.mock`, Redis is replaced with `MemorySaver`, and WhatsApp calls never leave the process.
+No external services are required — Bedrock is mocked via `unittest.mock`, MemorySaver handles conversation state in-process, and WhatsApp calls never leave the process.
 
 ## Testing Bedrock locally (without WhatsApp)
 
@@ -55,7 +49,7 @@ Conversation history is preserved per `phone` value (stored in Redis via RedisSa
 
 ## Architecture
 
-This service sits between Meta's WhatsApp Cloud API and Reklaim's Rails monolith. Incoming messages arrive at `POST /webhooks/whatsapp`, are HMAC-verified, and immediately dispatched to a Celery task queue (backed by Redis) so the webhook returns within Meta's 20-second timeout. The Celery worker picks up each task, runs it through a LangGraph `StateGraph` that maintains per-dealer conversation history (keyed by phone number) using a Redis checkpointer, and sends the agent's reply back via the WhatsApp Cloud API. The Rails monolith is called to fetch open purchase orders and the active system prompt, keeping business logic out of this service.
+This service sits between Meta's WhatsApp Cloud API and Reklaim's Rails monolith. Incoming messages arrive at `POST /webhooks/whatsapp`, are HMAC-verified, and immediately dispatched to a FastAPI BackgroundTask so the webhook returns within Meta's 20-second timeout. The background task runs each message through a LangGraph `StateGraph` that maintains per-dealer conversation history (keyed by phone number) using an in-memory checkpointer, and sends the agent's reply back via the WhatsApp Cloud API. The Rails monolith is called to fetch open purchase orders and the active system prompt, keeping business logic out of this service.
 
 ## What's real vs stubbed
 
@@ -63,22 +57,20 @@ This service sits between Meta's WhatsApp Cloud API and Reklaim's Rails monolith
 |---|---|---|
 | AWS Bedrock (Claude 3.5 Sonnet) | **Real** | Requires AWS credentials in `.env` |
 | WhatsApp Cloud API | **Real** | Requires Meta credentials in `.env` |
-| Redis (broker + checkpointer) | **Real** | `docker-compose up -d` |
+| Conversation memory | **In-process** | `MemorySaver` — resets on restart, MySQL checkpointer TBD |
 | HMAC verification | **Real** | Uses `WHATSAPP_APP_SECRET` from `.env` |
 | Rails monolith | **Stub** | `MonolithClient` returns hardcoded mock data |
 | Bedrock (in tests) | **Mocked** | `unittest.mock.patch` — no AWS calls in `pytest` |
-| WhatsApp (in tests) | **Mocked** | Celery task `.delay()` is patched |
+| WhatsApp (in tests) | **Mocked** | Background task is patched |
 
 ## Project layout
 
 ```
 app/
   api/          FastAPI app factory, webhook endpoints, /chat/test
-  worker/       Celery app, process_whatsapp_message task
-  agent/        LangGraph graph, AgentState, prompts
+  agent/        LangGraph graph, AgentState, prompts, process_whatsapp_message task
   services/     WhatsApp (Meta API) and monolith clients
   core/         Settings (pydantic-settings), HMAC security helper
 tests/
-docker-compose.yml
 .env.example
 ```

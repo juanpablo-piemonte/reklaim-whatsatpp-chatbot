@@ -27,13 +27,12 @@ def build_graph(checkpointer=None):
     """Build and compile the LangGraph agent.
 
     Pass a checkpointer explicitly in tests (e.g. MemorySaver()).
-    In production RedisSaver is created from settings.redis_url.
+    In production MemorySaver is used until a persistent DB checkpointer is configured.
     """
     if checkpointer is None:
-        from langgraph.checkpoint.redis import RedisSaver
+        from langgraph.checkpoint.memory import MemorySaver
 
-        checkpointer = RedisSaver(settings.redis_url)
-        checkpointer.setup()
+        checkpointer = MemorySaver()
 
     builder = StateGraph(AgentState)
     builder.add_node("agent", _agent_node)

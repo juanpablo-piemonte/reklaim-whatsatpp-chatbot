@@ -2,11 +2,8 @@ import logging
 
 from langchain_core.messages import HumanMessage
 
-from app.worker.celery_app import celery_app
-
 logger = logging.getLogger(__name__)
 
-# Graph is built once per worker process and reused across tasks.
 _graph = None
 
 
@@ -18,8 +15,7 @@ def _get_graph():
     return _graph
 
 
-@celery_app.task(name="app.worker.tasks.process_whatsapp_message")
-def process_whatsapp_message(message: dict) -> str:
+async def process_whatsapp_message(message: dict) -> str:
     from app.services.whatsapp_client import whatsapp_client
 
     dealer_phone: str = message.get("from", "unknown")

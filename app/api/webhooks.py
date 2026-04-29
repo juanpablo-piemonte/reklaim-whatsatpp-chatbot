@@ -1,7 +1,7 @@
 import json
 import logging
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Query, Request, Response
 from fastapi.responses import PlainTextResponse
 
 from app.core.config import settings
@@ -27,9 +27,9 @@ async def verify_webhook(
 
 
 @router.post("/whatsapp")
-async def receive_message(request: Request):
+async def receive_message(request: Request, background_tasks: BackgroundTasks):
     """Receive incoming WhatsApp messages from Meta."""
-    from app.worker.tasks import process_whatsapp_message
+    from app.agent.tasks import process_whatsapp_message
 
     body_bytes = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
@@ -52,6 +52,6 @@ async def receive_message(request: Request):
         wamid = message.get("id")
         body = message.get("text", {}).get("body", "")
         logger.info("Received message wamid=%s body=%r", wamid, body)
-        process_whatsapp_message.delay(message)
+        background_tasks.add_task(process_whatsapp_message, message)
 
     return {"status": "ok"}

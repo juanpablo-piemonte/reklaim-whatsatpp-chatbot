@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -39,8 +39,7 @@ def graph(mock_bedrock):
 
 
 @pytest.fixture
-def mock_celery_task():
-    """Patch Celery task .delay() so no worker is needed during tests."""
-    with patch("app.worker.tasks.process_whatsapp_message.delay") as mock_delay:
-        mock_delay.return_value = None
-        yield mock_delay
+def mock_background_task():
+    """Patch process_whatsapp_message so no agent is invoked during webhook tests."""
+    with patch("app.agent.tasks.process_whatsapp_message", new_callable=AsyncMock) as mock_task:
+        yield mock_task

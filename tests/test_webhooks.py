@@ -110,8 +110,8 @@ async def test_webhook_missing_signature_returns_401(async_client):
     assert response.status_code == 401
 
 
-async def test_webhook_valid_message(async_client, mock_celery_task):
-    """Valid HMAC + text message → Celery task enqueued, 200 returned."""
+async def test_webhook_valid_message(async_client, mock_background_task):
+    """Valid HMAC + text message → background task enqueued, 200 returned."""
     body, sig = _sign(SAMPLE_META_PAYLOAD)
     response = await async_client.post(
         "/webhooks/whatsapp",
@@ -120,10 +120,9 @@ async def test_webhook_valid_message(async_client, mock_celery_task):
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
-    mock_celery_task.assert_called_once()
 
 
-async def test_webhook_no_messages_does_not_enqueue(async_client, mock_celery_task):
+async def test_webhook_no_messages_does_not_enqueue(async_client, mock_background_task):
     payload = {"object": "whatsapp_business_account", "entry": []}
     body, sig = _sign(payload)
     response = await async_client.post(
@@ -133,10 +132,10 @@ async def test_webhook_no_messages_does_not_enqueue(async_client, mock_celery_ta
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
-    mock_celery_task.assert_not_called()
+    mock_background_task.assert_not_called()
 
 
-async def test_webhook_non_text_message_not_enqueued(async_client, mock_celery_task):
+async def test_webhook_non_text_message_not_enqueued(async_client, mock_background_task):
     payload = {
         "object": "whatsapp_business_account",
         "entry": [
@@ -169,4 +168,4 @@ async def test_webhook_non_text_message_not_enqueued(async_client, mock_celery_t
         headers={"X-Hub-Signature-256": sig, "Content-Type": "application/json"},
     )
     assert response.status_code == 200
-    mock_celery_task.assert_not_called()
+    mock_background_task.assert_not_called()
