@@ -11,7 +11,11 @@ load_dotenv(override=False)
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore", env_ignore_empty=True)
 
-    mysql_url: Optional[str] = None
+    # DB — managed by Rails monolith, used here for the LangGraph checkpointer (TBD)
+    db_host: Optional[str] = None
+    db_user: Optional[str] = None
+    db_pass: Optional[str] = None
+    db_name: Optional[str] = None
 
     whatsapp_app_secret: str = "dev-secret"
     whatsapp_verify_token: str = "dev-verify-token"
