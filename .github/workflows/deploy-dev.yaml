@@ -52,7 +52,7 @@ jobs:
       - name: Update ECS Service
         run: |
           aws ecs update-service \
-            --cluster reklaim-whatsapp-chatbot-qa \
-            --service reklaim-whatsapp-chatbot-qa \
+            --cluster reklaim-whatsapp-chatbot-dev \
+            --service reklaim-whatsapp-chatbot-dev \
             --force-new-deployment \
             --region us-west-1
