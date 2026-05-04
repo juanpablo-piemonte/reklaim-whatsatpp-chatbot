@@ -1,6 +1,6 @@
 # reklaim-whatsapp-ai
 
-A standalone Python microservice that powers a WhatsApp chatbot for Reklaim, a luxury goods platform. Dealers send messages via WhatsApp; the service receives them through a Meta webhook, processes each message asynchronously with FastAPI BackgroundTasks and a LangGraph agent backed by AWS Bedrock (Claude 3.5 Sonnet), and sends replies back through the WhatsApp Cloud API. It integrates with a Rails monolith for business context (purchase orders, prompts) over an internal HTTP API.
+A standalone Python microservice that powers a WhatsApp chatbot for Reklaim, a luxury goods platform. Dealers send messages via WhatsApp; the service receives them through a Meta webhook, processes each message asynchronously with FastAPI BackgroundTasks and a LangGraph agent backed by AWS Bedrock (Claude 3.5 Sonnet), and sends replies back through the WhatsApp Cloud API. It integrates with a Rails monolith for business context (purchase orders, prompts) over an internal HTTP API. So far it only supports dev and locally hosted environments.
 
 ## Local setup
 
