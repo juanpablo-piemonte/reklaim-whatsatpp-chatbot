@@ -71,7 +71,7 @@ The GitHub repository must have two secrets configured (same IAM credentials use
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
 
-Terraform state is stored in S3 bucket `reklaim-whatsapp-chatbot-tfstate` (us-east-1). Create it before running `make qa-init`:
+Terraform state is stored in S3 bucket `reklaim-whatsapp-chatbot-tfstate` (us-east-1). Create it before running `make dev-init`:
 ```bash
 aws s3api create-bucket --bucket reklaim-whatsapp-chatbot-tfstate --region us-east-1
 ```
