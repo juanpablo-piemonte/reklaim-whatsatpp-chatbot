@@ -8,6 +8,15 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from app.agent.graph import build_graph
 from app.api.main import app
+from app.core.config import settings
+
+
+@pytest.fixture(autouse=True)
+def patch_settings():
+    """Force test credential defaults regardless of .env content."""
+    with patch.object(settings, "whatsapp_verify_token", "dev-verify-token"), \
+         patch.object(settings, "whatsapp_app_secret", "dev-secret"):
+        yield
 
 
 @pytest.fixture
@@ -27,7 +36,7 @@ def mock_bedrock():
     """Patch ChatBedrock so tests never hit AWS."""
     fake = AIMessage(content="Mocked Bedrock response.")
     mock_llm = MagicMock()
-    mock_llm.invoke.return_value = fake
+    mock_llm.bind_tools.return_value.invoke.return_value = fake
     with patch("app.agent.graph.ChatBedrock", return_value=mock_llm):
         yield mock_llm
 

@@ -1,10 +1,11 @@
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
 from app.agent.graph import get_graph
+from app.core.security import require_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ class ChatTestRequest(BaseModel):
     message: str
 
 
-@router.post("/test")
+@router.post("/test", dependencies=[Depends(require_api_key)])
 def chat_test(body: ChatTestRequest) -> dict:
     """Directly invoke the agent and return the response as JSON.
     Use this to test the Bedrock integration without needing WhatsApp.

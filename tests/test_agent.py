@@ -49,9 +49,9 @@ def test_agent_calls_llm_with_messages(graph, mock_bedrock):
         },
         config={"configurable": {"thread_id": "test-llm-call"}},
     )
-    mock_bedrock.invoke.assert_called_once()
-    call_args = mock_bedrock.invoke.call_args[0][0]
-    # First element should be the SystemMessage, last should be the HumanMessage
+    bound = mock_bedrock.bind_tools.return_value
+    bound.invoke.assert_called_once()
+    call_args = bound.invoke.call_args[0][0]
     assert call_args[-1].content == "What can you help me with?"
 
 

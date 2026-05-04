@@ -63,6 +63,21 @@ This service sits between Meta's WhatsApp Cloud API and Reklaim's Rails monolith
 | Bedrock (in tests) | **Mocked** | `unittest.mock.patch` — no AWS calls in `pytest` |
 | WhatsApp (in tests) | **Mocked** | Background task is patched |
 
+## Deployment (CI/CD)
+
+Pushes to the `dev` branch trigger `.github/workflows/deploy-dev.yaml`, which builds and pushes a Docker image to ECR and force-deploys the ECS service.
+
+The GitHub repository must have two secrets configured (same IAM credentials used by the reklaim repo — ask the infra team):
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+
+Terraform state is stored in S3 bucket `reklaim-whatsapp-chatbot-tfstate` (us-east-1). Create it before running `make qa-init`:
+```bash
+aws s3api create-bucket --bucket reklaim-whatsapp-chatbot-tfstate --region us-east-1
+```
+
+After `terraform apply`, populate the `dev/reklaim-whatsapp-chatbot` secret in AWS Secrets Manager with the values from your local `.env` before the ECS task will start.
+
 ## Project layout
 
 ```

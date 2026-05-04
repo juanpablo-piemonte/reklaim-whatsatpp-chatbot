@@ -1,0 +1,58 @@
+name: deploy-dev
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["dev"]
+
+env:
+  AWS_REGION: us-west-1
+  AWS_ACCOUNT_ID: 858551718867
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Install AWS CLI
+        run: |
+          if ! command -v aws &> /dev/null; then
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            sudo ./aws/install
+          else
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            sudo ./aws/install --update
+          fi
+
+      - name: Build and push to ECR
+        run: |
+          docker build -t reklaim-whatsapp-chatbot-dev . --no-cache
+          aws ecr get-login-password --region us-west-1 | docker login --username AWS \
+            --password-stdin 858551718867.dkr.ecr.us-west-1.amazonaws.com
+          docker tag reklaim-whatsapp-chatbot-dev:latest \
+            858551718867.dkr.ecr.us-west-1.amazonaws.com/reklaim-whatsapp-chatbot-dev:latest
+          docker push \
+            858551718867.dkr.ecr.us-west-1.amazonaws.com/reklaim-whatsapp-chatbot-dev:latest
+
+      - name: Update ECS Service
+        run: |
+          aws ecs update-service \
+            --cluster reklaim-whatsapp-chatbot-qa \
+            --service reklaim-whatsapp-chatbot-qa \
+            --force-new-deployment \
+            --region us-west-1
