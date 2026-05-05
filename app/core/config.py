@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -5,7 +6,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Populate os.environ from .env so boto3 and other libraries that read
 # os.environ directly (not pydantic-settings) pick up the credentials.
-load_dotenv(override=False)
+load_dotenv(override=True)
+
+# Remove session token if empty so boto3 doesn't send an invalid token.
+if not os.environ.get("AWS_SESSION_TOKEN"):
+    os.environ.pop("AWS_SESSION_TOKEN", None)
 
 
 class Settings(BaseSettings):
