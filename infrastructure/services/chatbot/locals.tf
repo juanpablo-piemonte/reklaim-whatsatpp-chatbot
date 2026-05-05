@@ -28,11 +28,7 @@ locals {
       "name"      : "AWS_SECRET_ACCESS_KEY",
       "valueFrom" : "${aws_secretsmanager_secret.secret.arn}:AWS_SECRET_ACCESS_KEY::"
     },
-    {
-      "name"      : "AWS_SESSION_TOKEN",
-      "valueFrom" : "${aws_secretsmanager_secret.secret.arn}:AWS_SESSION_TOKEN::"
-    },
-    {
+{
       "name"      : "BEDROCK_MODEL_ID",
       "valueFrom" : "${aws_secretsmanager_secret.secret.arn}:BEDROCK_MODEL_ID::"
     },
