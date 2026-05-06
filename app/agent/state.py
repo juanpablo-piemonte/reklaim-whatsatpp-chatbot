@@ -6,6 +6,6 @@ from typing_extensions import TypedDict
 
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
-    dealer_phone: str
+    from_phone: str
     stage: str  # greeting | collecting | offer_received | closed
     metadata: dict

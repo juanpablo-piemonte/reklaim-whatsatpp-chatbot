@@ -2,8 +2,8 @@ import logging
 
 from fastapi import FastAPI
 
-from app.api.chat import router as chat_router
-from app.api.webhooks import router as webhooks_router
+from app.core.api.chat import router as chat_router
+from app.core.api.webhooks import router as webhooks_router
 
 logging.basicConfig(level=logging.INFO)
 

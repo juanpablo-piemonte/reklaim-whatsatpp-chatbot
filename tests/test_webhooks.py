@@ -2,9 +2,7 @@ import hashlib
 import hmac
 import json
 
-import pytest
-
-SAMPLE_META_PAYLOAD = {
+SAMPLE_TEXT_PAYLOAD = {
     "object": "whatsapp_business_account",
     "entry": [
         {
@@ -17,6 +15,9 @@ SAMPLE_META_PAYLOAD = {
                             "display_phone_number": "15550001234",
                             "phone_number_id": "987654321",
                         },
+                        "contacts": [
+                            {"profile": {"name": "Test User"}, "wa_id": "15559876543"}
+                        ],
                         "messages": [
                             {
                                 "from": "15559876543",
@@ -24,6 +25,72 @@ SAMPLE_META_PAYLOAD = {
                                 "timestamp": "1700000000",
                                 "type": "text",
                                 "text": {"body": "Hello, I need help with my car."},
+                            }
+                        ],
+                    },
+                    "field": "messages",
+                }
+            ],
+        }
+    ],
+}
+
+SAMPLE_IMAGE_PAYLOAD = {
+    "object": "whatsapp_business_account",
+    "entry": [
+        {
+            "id": "123456789",
+            "changes": [
+                {
+                    "value": {
+                        "messaging_product": "whatsapp",
+                        "metadata": {
+                            "display_phone_number": "15550001234",
+                            "phone_number_id": "987654321",
+                        },
+                        "contacts": [
+                            {"profile": {"name": "Test User"}, "wa_id": "15559876543"}
+                        ],
+                        "messages": [
+                            {
+                                "from": "15559876543",
+                                "id": "wamid.img001",
+                                "timestamp": "1700000001",
+                                "type": "image",
+                                "image": {
+                                    "id": "media123",
+                                    "mime_type": "image/jpeg",
+                                    "caption": "Check this out",
+                                },
+                            }
+                        ],
+                    },
+                    "field": "messages",
+                }
+            ],
+        }
+    ],
+}
+
+SAMPLE_STATUS_PAYLOAD = {
+    "object": "whatsapp_business_account",
+    "entry": [
+        {
+            "id": "123456789",
+            "changes": [
+                {
+                    "value": {
+                        "messaging_product": "whatsapp",
+                        "metadata": {
+                            "display_phone_number": "15550001234",
+                            "phone_number_id": "987654321",
+                        },
+                        "statuses": [
+                            {
+                                "id": "wamid.out001",
+                                "status": "delivered",
+                                "timestamp": "1700000002",
+                                "recipient_id": "15559876543",
                             }
                         ],
                     },
@@ -42,9 +109,7 @@ def _sign(payload: dict, secret: str = "dev-secret") -> tuple[bytes, str]:
     return body, sig
 
 
-# ---------------------------------------------------------------------------
-# Health
-# ---------------------------------------------------------------------------
+# ── Health ────────────────────────────────────────────────────────────────────
 
 async def test_health_check(async_client):
     response = await async_client.get("/health")
@@ -52,12 +117,9 @@ async def test_health_check(async_client):
     assert response.json() == {"status": "ok"}
 
 
-# ---------------------------------------------------------------------------
-# GET /webhooks/whatsapp — Meta hub verification
-# ---------------------------------------------------------------------------
+# ── GET /webhooks/whatsapp — Meta hub verification ────────────────────────────
 
 async def test_webhook_verification_valid(async_client):
-    """Valid hub.verify_token returns 200 and echoes the challenge."""
     response = await async_client.get(
         "/webhooks/whatsapp",
         params={
@@ -82,26 +144,20 @@ async def test_webhook_verification_wrong_token(async_client):
     assert response.status_code == 403
 
 
-# ---------------------------------------------------------------------------
-# POST /webhooks/whatsapp — incoming messages
-# ---------------------------------------------------------------------------
+# ── POST /webhooks/whatsapp — HMAC ────────────────────────────────────────────
 
 async def test_webhook_invalid_hmac(async_client):
-    """Request with a bad HMAC signature is rejected with 401."""
-    body = json.dumps(SAMPLE_META_PAYLOAD).encode()
+    body = json.dumps(SAMPLE_TEXT_PAYLOAD).encode()
     response = await async_client.post(
         "/webhooks/whatsapp",
         content=body,
-        headers={
-            "X-Hub-Signature-256": "sha256=badhash",
-            "Content-Type": "application/json",
-        },
+        headers={"X-Hub-Signature-256": "sha256=badhash", "Content-Type": "application/json"},
     )
     assert response.status_code == 401
 
 
 async def test_webhook_missing_signature_returns_401(async_client):
-    body = json.dumps(SAMPLE_META_PAYLOAD).encode()
+    body = json.dumps(SAMPLE_TEXT_PAYLOAD).encode()
     response = await async_client.post(
         "/webhooks/whatsapp",
         content=body,
@@ -110,9 +166,10 @@ async def test_webhook_missing_signature_returns_401(async_client):
     assert response.status_code == 401
 
 
-async def test_webhook_valid_message(async_client, mock_background_task):
-    """Valid HMAC + text message → background task enqueued, 200 returned."""
-    body, sig = _sign(SAMPLE_META_PAYLOAD)
+# ── POST /webhooks/whatsapp — event dispatching ───────────────────────────────
+
+async def test_webhook_text_message_enqueues_handler(async_client, mock_handlers):
+    body, sig = _sign(SAMPLE_TEXT_PAYLOAD)
     response = await async_client.post(
         "/webhooks/whatsapp",
         content=body,
@@ -120,9 +177,32 @@ async def test_webhook_valid_message(async_client, mock_background_task):
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    mock_handlers["message"].assert_called_once()
 
 
-async def test_webhook_no_messages_does_not_enqueue(async_client, mock_background_task):
+async def test_webhook_image_message_enqueues_handler(async_client, mock_handlers):
+    body, sig = _sign(SAMPLE_IMAGE_PAYLOAD)
+    response = await async_client.post(
+        "/webhooks/whatsapp",
+        content=body,
+        headers={"X-Hub-Signature-256": sig, "Content-Type": "application/json"},
+    )
+    assert response.status_code == 200
+    mock_handlers["message"].assert_called_once()
+
+
+async def test_webhook_status_update_enqueues_handler(async_client, mock_handlers):
+    body, sig = _sign(SAMPLE_STATUS_PAYLOAD)
+    response = await async_client.post(
+        "/webhooks/whatsapp",
+        content=body,
+        headers={"X-Hub-Signature-256": sig, "Content-Type": "application/json"},
+    )
+    assert response.status_code == 200
+    mock_handlers["status"].assert_called_once()
+
+
+async def test_webhook_empty_payload_returns_ok(async_client, mock_handlers):
     payload = {"object": "whatsapp_business_account", "entry": []}
     body, sig = _sign(payload)
     response = await async_client.post(
@@ -131,41 +211,5 @@ async def test_webhook_no_messages_does_not_enqueue(async_client, mock_backgroun
         headers={"X-Hub-Signature-256": sig, "Content-Type": "application/json"},
     )
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-    mock_background_task.assert_not_called()
-
-
-async def test_webhook_non_text_message_not_enqueued(async_client, mock_background_task):
-    payload = {
-        "object": "whatsapp_business_account",
-        "entry": [
-            {
-                "id": "123456789",
-                "changes": [
-                    {
-                        "value": {
-                            "messaging_product": "whatsapp",
-                            "messages": [
-                                {
-                                    "from": "15559876543",
-                                    "id": "wamid.xyz999",
-                                    "timestamp": "1700000001",
-                                    "type": "image",
-                                    "image": {"id": "img123"},
-                                }
-                            ],
-                        },
-                        "field": "messages",
-                    }
-                ],
-            }
-        ],
-    }
-    body, sig = _sign(payload)
-    response = await async_client.post(
-        "/webhooks/whatsapp",
-        content=body,
-        headers={"X-Hub-Signature-256": sig, "Content-Type": "application/json"},
-    )
-    assert response.status_code == 200
-    mock_background_task.assert_not_called()
+    mock_handlers["message"].assert_not_called()
+    mock_handlers["status"].assert_not_called()
