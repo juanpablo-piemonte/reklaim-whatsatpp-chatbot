@@ -28,7 +28,7 @@ def _build_checkpointer():
         return MemorySaver()
     try:
         import pymysql
-        from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
+        from langgraph.checkpoint.mysql.pymysql import ShallowPyMySQLSaver as ShallowMySQLSaver
         ssl = {"ca": settings.db_ssl_cert} if os.path.exists(settings.db_ssl_cert) else None
         conn = pymysql.connect(
             host=settings.db_host,
@@ -41,7 +41,7 @@ def _build_checkpointer():
         # Verify tables exist before returning the saver — we are a consumer, not an admin.
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM checkpoints LIMIT 1")
-        saver = PyMySQLSaver(conn)
+        saver = ShallowMySQLSaver(conn)
         logger.info("MySQL checkpointer ready (host=%s db=%s)", settings.db_host, settings.db_name)
         return saver
     except Exception as exc:
