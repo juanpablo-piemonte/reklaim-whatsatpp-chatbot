@@ -1,16 +1,22 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.db.models import AgentRun, Conversation, Message
 
+_CUSTOMER_WINDOW_HOURS = 24
+
 logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _window_expires_at() -> datetime:
+    return _now() + timedelta(hours=_CUSTOMER_WINDOW_HOURS)
 
 
 class ConversationRepository:
@@ -27,10 +33,11 @@ class ConversationRepository:
             .first()
         )
         if conv:
+            conv.customer_window_expires_at = _window_expires_at()
+            conv.updated_at = _now()
             if contact_name and conv.contact_name != contact_name:
                 conv.contact_name = contact_name
-                conv.updated_at = _now()
-                db.commit()
+            db.commit()
             return conv
 
         now = _now()
@@ -38,6 +45,7 @@ class ConversationRepository:
             phone_number_id=phone_number_id,
             from_phone=from_phone,
             contact_name=contact_name,
+            customer_window_expires_at=_window_expires_at(),
             created_at=now,
             updated_at=now,
         )

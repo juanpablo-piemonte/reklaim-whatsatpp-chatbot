@@ -16,11 +16,12 @@ if not os.environ.get("AWS_SESSION_TOKEN"):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore", env_ignore_empty=True)
 
-    # DB — managed by Rails monolith, used here for the LangGraph checkpointer (TBD)
+    # DB — managed by Rails monolith
     db_host: Optional[str] = None
     db_user: Optional[str] = None
     db_pass: Optional[str] = None
     db_name: Optional[str] = None
+    db_ssl_cert: str = "global-bundle.pem"  # path to RDS CA bundle
 
     whatsapp_app_secret: str = "dev-secret"
     whatsapp_verify_token: str = "dev-verify-token"
