@@ -4,8 +4,10 @@ import time
 from app.core.chatbot.mapper import extract_usage, to_agent_input, to_outbound_message
 from app.core.chatbot.session import get_or_create_conversation
 from app.core.config import settings
-from app.whatsapp.models import Contact, InboundMessage, PhoneMetadata, StatusUpdate
+from app.whatsapp.models import Contact, InboundMessage, OutboundText, PhoneMetadata, StatusUpdate
 from app.whatsapp.parser import MessageEvent, StatusEvent
+
+_FALLBACK_BODY = "I had an issue processing your message. Please try again later."
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,9 @@ async def _handle_inbound_text(
 ) -> None:
     from_phone = message.from_
     logger.info("[handler] inbound text from=%s wamid=%s", from_phone, message.id)
+
+    from app.whatsapp.client import whatsapp_client
+    whatsapp_client.mark_as_read(message.id)
 
     conv, db = get_or_create_conversation(metadata.phone_number_id, from_phone, contact)
 
@@ -54,11 +59,20 @@ async def _handle_inbound_text(
 
     if error:
         logger.error("[handler] agent error for wamid=%s: %s", message.id, error)
+        try:
+            whatsapp_client.send(OutboundText(to=from_phone, body=_FALLBACK_BODY))
+        except Exception as exc:
+            logger.error("[handler] failed to send fallback message: %s", exc)
         return
 
-    from app.whatsapp.client import whatsapp_client
-    outbound = to_outbound_message(result, to=from_phone)
-    send_result = whatsapp_client.send(outbound)
+    outbound, thinking = to_outbound_message(result, to=from_phone)
+    if thinking:
+        logger.debug("[handler] thinking block stripped: %s", thinking[:200])
+    try:
+        send_result = whatsapp_client.send(outbound)
+    except Exception as exc:
+        logger.error("[handler] failed to send outbound message to %s: %s", from_phone, exc)
+        return
 
     if db and send_result.wamid:
         from app.core.db.repositories import message_repo
@@ -82,12 +96,14 @@ async def _handle_inbound_image(
     image = message.image
     logger.info("[handler] inbound image from=%s wamid=%s", from_phone, message.id)
 
+    from app.whatsapp.client import whatsapp_client
+    whatsapp_client.mark_as_read(message.id)
+
     conv, db = get_or_create_conversation(metadata.phone_number_id, from_phone, contact)
 
     media_url: str | None = None
     if image:
         try:
-            from app.whatsapp.client import whatsapp_client
             media_url = whatsapp_client.get_media_url(image.id)
             object.__setattr__(image, "_resolved_url", media_url)
         except Exception as exc:
@@ -118,11 +134,20 @@ async def _handle_inbound_image(
 
     if error:
         logger.error("[handler] agent error for wamid=%s: %s", message.id, error)
+        try:
+            whatsapp_client.send(OutboundText(to=from_phone, body=_FALLBACK_BODY))
+        except Exception as exc:
+            logger.error("[handler] failed to send fallback message: %s", exc)
         return
 
-    from app.whatsapp.client import whatsapp_client
-    outbound = to_outbound_message(result, to=from_phone)
-    send_result = whatsapp_client.send(outbound)
+    outbound, thinking = to_outbound_message(result, to=from_phone)
+    if thinking:
+        logger.debug("[handler] thinking block stripped: %s", thinking[:200])
+    try:
+        send_result = whatsapp_client.send(outbound)
+    except Exception as exc:
+        logger.error("[handler] failed to send outbound message to %s: %s", from_phone, exc)
+        return
 
     if db and send_result.wamid:
         from app.core.db.repositories import message_repo

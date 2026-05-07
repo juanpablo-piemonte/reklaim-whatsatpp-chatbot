@@ -11,11 +11,11 @@ class PhoneMetadata(BaseModel):
 
 
 class ContactProfile(BaseModel):
-    name: str
+    name: str | None = None
 
 
 class Contact(BaseModel):
-    profile: ContactProfile
+    profile: ContactProfile | None = None
     wa_id: str
 
 

@@ -1,6 +1,20 @@
+import re
+
 from langchain_core.messages import HumanMessage
 
 from app.whatsapp.models import AnyOutboundMessage, Contact, InboundMessage, OutboundText
+
+_THINKING_RE = re.compile(r"<thinking>.*?</thinking>\s*", re.DOTALL | re.IGNORECASE)
+
+
+def extract_thinking(text: str) -> tuple[str, str | None]:
+    """Split model output into (clean_text, thinking_content).
+    Returns the thinking block separately so callers can persist it if needed.
+    """
+    match = _THINKING_RE.search(text)
+    thinking = match.group(0).strip() if match else None
+    clean = _THINKING_RE.sub("", text).strip()
+    return clean, thinking
 
 
 def to_agent_input(message: InboundMessage, contact: Contact | None) -> dict:
@@ -44,8 +58,11 @@ def extract_usage(result: dict) -> dict:
     }
 
 
-def to_outbound_message(result: dict, to: str) -> AnyOutboundMessage:
-    """Build an outbound WhatsApp message from the agent's graph result."""
+def to_outbound_message(result: dict, to: str) -> tuple[AnyOutboundMessage, str | None]:
+    """Build an outbound WhatsApp message from the agent's graph result.
+    Returns (message, thinking) where thinking is the stripped <thinking> block or None.
+    """
     last_msg = result.get("messages", [None])[-1]
-    text = getattr(last_msg, "content", "") or ""
-    return OutboundText(to=to, body=text)
+    raw = getattr(last_msg, "content", "") or ""
+    clean, thinking = extract_thinking(raw)
+    return OutboundText(to=to, body=clean), thinking

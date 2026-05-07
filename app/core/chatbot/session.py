@@ -1,15 +1,8 @@
 import logging
-from datetime import datetime, timedelta, timezone
 
 from app.whatsapp.models import Contact, PhoneMetadata
 
 logger = logging.getLogger(__name__)
-
-_CUSTOMER_WINDOW_HOURS = 24
-
-
-def customer_window_expires_at() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=_CUSTOMER_WINDOW_HOURS)
 
 
 def get_or_create_conversation(

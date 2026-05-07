@@ -7,8 +7,20 @@ from app.whatsapp.models import AnyOutboundMessage, OutboundImage, OutboundText,
 
 logger = logging.getLogger(__name__)
 
-_META_API_VERSION = "v23.0"
+_META_API_VERSION = "v25.0"
 _GRAPH_API_BASE = f"https://graph.facebook.com/{_META_API_VERSION}"
+
+
+def _normalize_phone(number: str) -> str:
+    """Normalize Argentine WhatsApp numbers for outbound sending.
+    WhatsApp delivers inbound from=549AREA... but the API expects 54AREA15... to send back.
+    """
+    if number.startswith("549") and len(number) == 13:
+        # 549 + 3-digit area + 7-digit local → 54 + area + 15 + local
+        area = number[3:6]
+        local = number[6:]
+        return f"54{area}15{local}"
+    return number
 
 
 class WhatsAppClient:
@@ -18,6 +30,26 @@ class WhatsAppClient:
         if isinstance(msg, OutboundImage):
             return self._send_image(msg)
         raise ValueError(f"Unsupported outbound message type: {type(msg)}")
+
+    def mark_as_read(self, wamid: str) -> None:
+        """Send a read receipt for an inbound message."""
+        url = f"{_GRAPH_API_BASE}/{settings.whatsapp_phone_number_id}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "status": "read",
+            "message_id": wamid,
+        }
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.post(
+                    url,
+                    json=payload,
+                    headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
+                )
+            if not resp.is_success:
+                logger.warning("[WhatsApp] mark_as_read failed %d: %s", resp.status_code, resp.text)
+        except Exception as exc:
+            logger.warning("[WhatsApp] mark_as_read error: %s", exc)
 
     def get_media_url(self, media_id: str) -> str:
         """Resolve a Meta media ID to its temporary download URL."""
@@ -60,8 +92,10 @@ class WhatsAppClient:
         return self._post_message(msg.to, payload)
 
     def _post_message(self, to: str, payload: dict) -> SendResult:
+        normalized = _normalize_phone(to)
+        payload["to"] = normalized
         url = f"{_GRAPH_API_BASE}/{settings.whatsapp_phone_number_id}/messages"
-        logger.info("[WhatsApp] → %s type=%s", to, payload.get("type"))
+        logger.info("[WhatsApp] → %s (normalized from %s) type=%s", normalized, to, payload.get("type"))
         with httpx.Client(timeout=10.0) as client:
             resp = client.post(
                 url,
