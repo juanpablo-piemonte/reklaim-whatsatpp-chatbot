@@ -114,7 +114,9 @@ def _sign(payload: dict, secret: str = "dev-secret") -> tuple[bytes, str]:
 async def test_health_check(async_client):
     response = await async_client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body.get("db") in (None, "connected", "unreachable", "not_configured")
 
 
 # ── GET /webhooks/whatsapp — Meta hub verification ────────────────────────────
