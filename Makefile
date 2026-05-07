@@ -1,4 +1,4 @@
-.PHONY: run stop restart test logs install clean _guard_port
+.PHONY: run stop restart test logs install clean cert _guard_port
 
 VENV    := .venv
 PID_DIR := .pids
@@ -100,6 +100,12 @@ test:
 	$(VENV)/bin/pytest -v
 
 # ── First-time setup ─────────────────────────────────────────────────────────
+
+cert:
+	@echo "Downloading RDS CA bundle..."
+	@curl -fsSL -o global-bundle.pem \
+		https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+	@echo "  global-bundle.pem downloaded."
 
 install:
 	python3.12 -m venv $(VENV)

@@ -20,6 +20,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "pymysql",
     "cryptography",
+    "langgraph-checkpoint-mysql>=2.0",
 ]
 
 [project.optional-dependencies]
