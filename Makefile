@@ -1,4 +1,4 @@
-.PHONY: run stop restart test logs install clean cert _guard_port
+.PHONY: run stop restart test logs install clean cert cleanup _guard_port
 
 VENV    := .venv
 PID_DIR := .pids
@@ -113,6 +113,14 @@ install:
 	@cp -n .env.example .env 2>/dev/null \
 		&& echo ".env created — fill in your credentials before running 'make run'." \
 		|| echo ".env already exists."
+
+# ── Checkpoint cleanup ───────────────────────────────────────────────────────
+
+cleanup:
+	$(VENV)/bin/python scripts/cleanup_checkpoints.py
+
+cleanup-dry:
+	$(VENV)/bin/python scripts/cleanup_checkpoints.py --dry-run
 
 # ── Teardown ─────────────────────────────────────────────────────────────────
 
