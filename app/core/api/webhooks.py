@@ -6,6 +6,7 @@ from fastapi.responses import PlainTextResponse
 
 from app.core.config import settings
 from app.core.security import verify_hmac
+from app.whatsapp.parser import MessageEvent, StatusEvent, parse_webhook_payload
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +29,8 @@ async def verify_webhook(
 
 @router.post("/whatsapp")
 async def receive_message(request: Request, background_tasks: BackgroundTasks):
-    """Receive incoming WhatsApp messages from Meta."""
-    from app.agent.tasks import process_whatsapp_message
+    """Receive and dispatch incoming WhatsApp events from Meta."""
+    from app.core.chatbot.handlers import handle_message_event, handle_status_event
 
     body_bytes = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
@@ -38,20 +39,13 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
         logger.warning("WhatsApp webhook HMAC verification failed.")
         return Response(status_code=401)
 
-    payload = json.loads(body_bytes)
+    raw = json.loads(body_bytes)
+    events = parse_webhook_payload(raw)
 
-    try:
-        messages = payload["entry"][0]["changes"][0]["value"]["messages"]
-    except (KeyError, IndexError, TypeError):
-        logger.debug("Webhook payload contained no messages.")
-        return {"status": "ok"}
-
-    for message in messages:
-        if message.get("type") != "text":
-            continue
-        wamid = message.get("id")
-        body = message.get("text", {}).get("body", "")
-        logger.info("Received message wamid=%s body=%r", wamid, body)
-        background_tasks.add_task(process_whatsapp_message, message)
+    for event in events:
+        if isinstance(event, MessageEvent):
+            background_tasks.add_task(handle_message_event, event)
+        elif isinstance(event, StatusEvent):
+            background_tasks.add_task(handle_status_event, event)
 
     return {"status": "ok"}

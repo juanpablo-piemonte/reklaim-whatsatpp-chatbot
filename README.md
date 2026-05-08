@@ -1,28 +1,46 @@
 # reklaim-whatsapp-ai
 
-A standalone Python microservice that powers a WhatsApp chatbot for Reklaim, a luxury goods platform. Dealers send messages via WhatsApp; the service receives them through a Meta webhook, processes each message asynchronously with FastAPI BackgroundTasks and a LangGraph agent backed by AWS Bedrock (Claude 3.5 Sonnet), and sends replies back through the WhatsApp Cloud API. It integrates with a Rails monolith for business context (purchase orders, prompts) over an internal HTTP API. So far it only supports dev and locally hosted environments.
+A Python microservice that powers a WhatsApp chatbot for Reklaim, a luxury goods marketplace. Dealers send messages via WhatsApp; the service receives them through a Meta webhook, processes each message with a LangGraph ReAct agent backed by AWS Bedrock (Amazon Nova Pro), and sends replies back through the WhatsApp Cloud API. Integrates with the Reklaim Rails monolith over an internal HTTP API.
 
 ## Local setup
 
-```bash
-cp .env.example .env   # fill in AWS + WhatsApp credentials
-make install
-make run
-```
-
-Python 3.12 is required.
-
-## Running tests
+Python 3.12 required.
 
 ```bash
-pytest
+cp .env.example .env   # fill in credentials
+make install           # creates .venv and installs all deps
+make cert              # downloads RDS SSL cert (global-bundle.pem)
+make run               # starts Uvicorn on :8000
 ```
 
-No external services are required — Bedrock is mocked via `unittest.mock`, MemorySaver handles conversation state in-process, and WhatsApp calls never leave the process.
+## Make commands
 
-## Testing Bedrock locally (without WhatsApp)
+| Command | Description |
+|---|---|
+| `make run` | Start Uvicorn on :8000 (logs to `logs/uvicorn.log`) |
+| `make stop` | Stop the running server |
+| `make restart` | Stop and start (alias for `make run`) |
+| `make logs` | Tail live server output |
+| `make test` | Run the full pytest suite |
+| `make install` | Create `.venv` and install all dependencies |
+| `make cert` | Download the RDS SSL CA bundle (`global-bundle.pem`) |
+| `make cleanup` | Delete checkpoint rows for inactive conversations (48h+) |
+| `make cleanup-dry` | Preview what `make cleanup` would delete without touching anything |
+| `make clean` | Stop server and remove `__pycache__`, `.pids`, `logs/` |
 
-Once `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION` are set in `.env`, use the `/chat/test` endpoint to talk directly to the agent:
+## Tests
+
+```bash
+make test
+# or a single file:
+.venv/bin/pytest tests/test_handlers.py -v
+```
+
+No external services required — Bedrock is mocked, MemorySaver handles state in-process, and WhatsApp calls never leave the process.
+
+## Testing the agent locally (without WhatsApp)
+
+With AWS credentials set in `.env`, hit `/chat/test` to talk directly to the agent:
 
 ```bash
 curl -s -X POST http://localhost:8000/chat/test \
@@ -30,62 +48,84 @@ curl -s -X POST http://localhost:8000/chat/test \
   -d '{"phone": "+15550001234", "message": "Hello, what can you help me with?"}' | jq
 ```
 
-Conversation history is preserved per `phone` value (stored in Redis via RedisSaver).
+## Webhook setup (ngrok)
 
-## Running with ngrok (WhatsApp webhook)
-
-1. Install ngrok: https://ngrok.com/download
-2. Start the FastAPI server: `uvicorn app.api.main:app --reload --port 8000`
-3. In another terminal: `ngrok http 8000`
-4. Copy the https forwarding URL (e.g. `https://abc123.ngrok.io`)
-5. In Meta for Developers → your App → WhatsApp → Configuration:
-   - Webhook URL: `https://abc123.ngrok.io/webhooks/whatsapp`
-   - Verify token: value of `WHATSAPP_VERIFY_TOKEN` in your `.env`
+1. `make run`
+2. In another terminal: `ngrok http 8000`
+3. In Meta for Developers → your App → WhatsApp → Configuration:
+   - Webhook URL: `https://<ngrok-id>.ngrok.io/webhooks/whatsapp`
+   - Verify token: value of `WHATSAPP_VERIFY_TOKEN` in `.env`
    - Subscribe to: **messages**
-6. Send a WhatsApp message to your test number — watch the terminal
-
-> **AWS IAM requirement:** the IAM user in your `.env` needs `bedrock:InvokeModel` permission on
-> `arn:aws:bedrock:{region}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0`
+4. Send a WhatsApp message to your test number and watch `make logs`
 
 ## Architecture
 
-This service sits between Meta's WhatsApp Cloud API and Reklaim's Rails monolith. Incoming messages arrive at `POST /webhooks/whatsapp`, are HMAC-verified, and immediately dispatched to a FastAPI BackgroundTask so the webhook returns within Meta's 20-second timeout. The background task runs each message through a LangGraph `StateGraph` that maintains per-dealer conversation history (keyed by phone number) using an in-memory checkpointer, and sends the agent's reply back via the WhatsApp Cloud API. The Rails monolith is called to fetch open purchase orders and the active system prompt, keeping business logic out of this service.
+```
+Meta webhook → POST /webhooks/whatsapp (HMAC-SHA256 verified)
+    → FastAPI BackgroundTask (returns 200 immediately)
+        → mark message as read
+        → persist inbound message to DB
+        → LangGraph ReAct agent (ShallowPyMySQLSaver checkpointer)
+            → ChatBedrock (Amazon Nova Pro)
+            → tools: Reklaim monolith API
+        → persist agent run (tokens, latency) to DB
+        → send reply via WhatsApp Cloud API
+        → persist outbound message to DB
+```
 
-## What's real vs stubbed
+**Key modules:**
 
-| Component | Local dev | Notes |
+| Path | Responsibility |
+|---|---|
+| `app/whatsapp/` | Meta webhook models, payload parser, WhatsApp HTTP client |
+| `app/agent/` | LangGraph graph, AgentState, system prompt, tools |
+| `app/core/api/` | FastAPI routes (`/webhooks`, `/chat`, `/health`) |
+| `app/core/chatbot/` | Orchestration: handlers, mapper, session |
+| `app/core/db/` | SQLAlchemy models, engine, repositories |
+| `app/core/clients/` | Reklaim Rails monolith HTTP client |
+
+**Conversation memory:** `ShallowPyMySQLSaver` — one checkpoint row per dealer (phone number), updated in place on every turn. Survives deploys and multi-worker ECS. Context window: last 20 messages sent to the LLM.
+
+## Component status
+
+| Component | Status | Notes |
 |---|---|---|
-| AWS Bedrock (Claude 3.5 Sonnet) | **Real** | Requires AWS credentials in `.env` |
-| WhatsApp Cloud API | **Real** | Requires Meta credentials in `.env` |
-| Conversation memory | **In-process** | `MemorySaver` — resets on restart, MySQL checkpointer TBD |
-| HMAC verification | **Real** | Uses `WHATSAPP_APP_SECRET` from `.env` |
-| Rails monolith | **Stub** | `MonolithClient` returns hardcoded mock data |
-| Bedrock (in tests) | **Mocked** | `unittest.mock.patch` — no AWS calls in `pytest` |
-| WhatsApp (in tests) | **Mocked** | Background task is patched |
+| AWS Bedrock (Nova Pro) | Real | Requires AWS credentials |
+| WhatsApp Cloud API | Real | Requires Meta credentials |
+| HMAC verification | Real | Uses `WHATSAPP_APP_SECRET` |
+| Conversation memory | MySQL | `ShallowPyMySQLSaver`, survives restarts |
+| DB persistence | Real | Conversations, messages, agent runs in RDS |
+| Rails monolith | Real (dev) | Stub data in local dev without `REKLAIM_API_URL` |
+| Bedrock (in tests) | Mocked | No AWS calls during `pytest` |
+| WhatsApp (in tests) | Mocked | Handlers patched at webhook level |
 
-## Deployment (CI/CD)
+## Deployment
 
-Pushes to the `dev` branch trigger `.github/workflows/deploy-dev.yaml`, which builds and pushes a Docker image to ECR and force-deploys the ECS service.
+Pushes to `dev` trigger `.github/workflows/deploy-dev.yaml` → builds Docker image → pushes to ECR → force-deploys ECS service.
 
-The GitHub repository must have two secrets configured (same IAM credentials used by the reklaim repo — ask the infra team):
+Required GitHub secrets (same IAM credentials as the reklaim repo):
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
 
-Terraform state is stored in S3 bucket `reklaim-whatsapp-chatbot-tfstate` (us-east-1). Create it before running `make dev-init`:
-```bash
-aws s3api create-bucket --bucket reklaim-whatsapp-chatbot-tfstate --region us-east-1
-```
-
-After `terraform apply`, populate the `dev/reklaim-whatsapp-chatbot` secret in AWS Secrets Manager with the values from your local `.env` before the ECS task will start.
+App credentials are injected at runtime from AWS Secrets Manager (`dev/reklaim-whatsapp-chatbot`). DB schema is managed by the Rails monolith repository.
 
 ## Project layout
 
 ```
 app/
-  api/          FastAPI app factory, webhook endpoints, /chat/test
-  agent/        LangGraph graph, AgentState, prompts, process_whatsapp_message task
-  services/     WhatsApp (Meta API) and monolith clients
-  core/         Settings (pydantic-settings), HMAC security helper
+  whatsapp/        Meta webhook models, parser, WhatsApp HTTP client
+  agent/           LangGraph graph, AgentState, prompts, tools
+  core/
+    api/           FastAPI app, webhook + chat routes, /health
+    chatbot/       Handlers, mapper (inbound→agent→outbound), session
+    clients/       Rails monolith HTTP client
+    db/            SQLAlchemy models, engine, repositories
+    config.py      Pydantic settings (loaded from .env)
+    security.py    HMAC-SHA256 signature verification
+scripts/
+  cleanup_checkpoints.py   Manual cleanup of inactive checkpoint rows
 tests/
 .env.example
+Dockerfile
+Makefile
 ```

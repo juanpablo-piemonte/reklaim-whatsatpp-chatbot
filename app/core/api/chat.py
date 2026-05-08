@@ -20,16 +20,14 @@ class ChatTestRequest(BaseModel):
 @router.post("/test", dependencies=[Depends(require_api_key)])
 def chat_test(body: ChatTestRequest) -> dict:
     """Directly invoke the agent and return the response as JSON.
-    Use this to test the Bedrock integration without needing WhatsApp.
     FastAPI runs sync routes in a thread pool so graph.invoke() won't block the event loop.
     """
     logger.info("[/chat/test] phone=%s message=%r", body.phone, body.message)
 
-    graph = get_graph()
-    result = graph.invoke(
+    result = get_graph().invoke(
         {
             "messages": [HumanMessage(content=body.message)],
-            "dealer_phone": body.phone,
+            "from_phone": body.phone,
             "stage": "greeting",
             "metadata": {},
         },

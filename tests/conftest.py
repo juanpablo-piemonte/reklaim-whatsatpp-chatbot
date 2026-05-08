@@ -1,13 +1,12 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.agent.graph import build_graph
-from app.api.main import app
+from app.core.api.main import app
 from app.core.config import settings
 
 
@@ -17,12 +16,6 @@ def patch_settings():
     with patch.object(settings, "whatsapp_verify_token", "dev-verify-token"), \
          patch.object(settings, "whatsapp_app_secret", "dev-secret"):
         yield
-
-
-@pytest.fixture
-def client():
-    with TestClient(app) as c:
-        yield c
 
 
 @pytest.fixture
@@ -48,7 +41,8 @@ def graph(mock_bedrock):
 
 
 @pytest.fixture
-def mock_background_task():
-    """Patch process_whatsapp_message so no agent is invoked during webhook tests."""
-    with patch("app.agent.tasks.process_whatsapp_message", new_callable=AsyncMock) as mock_task:
-        yield mock_task
+def mock_handlers():
+    """Patch chatbot handlers so no agent or WhatsApp client is invoked during webhook tests."""
+    with patch("app.core.chatbot.handlers.handle_message_event", new_callable=AsyncMock) as mock_msg, \
+         patch("app.core.chatbot.handlers.handle_status_event", new_callable=AsyncMock) as mock_status:
+        yield {"message": mock_msg, "status": mock_status}
