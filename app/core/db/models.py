@@ -1,12 +1,25 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class OutboundTemplate(Base):
+    __tablename__ = "outbound_templates"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    content: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    campaign_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(String(255), nullable=False, default="pending")
+    approval_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class Conversation(Base):
@@ -19,6 +32,22 @@ class Conversation(Base):
     customer_window_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    dealer_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    campaign_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    state: Mapped[str] = mapped_column(String(255), nullable=False, default="awaiting_reply")
+    current_offer_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    agreed_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class ConversationStateHistory(Base):
+    __tablename__ = "conversation_state_histories"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    from_state: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    to_state: Mapped[str] = mapped_column(String(255), nullable=False)
+    changed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class Message(Base):
@@ -28,18 +57,20 @@ class Message(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     conversation_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     wamid: Mapped[str] = mapped_column(String(255), nullable=False)
-    message_type: Mapped[str] = mapped_column(String(50), nullable=False)   # text, image
-    direction: Mapped[str] = mapped_column(String(20), nullable=False)       # inbound, outbound
+    message_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    direction: Mapped[str] = mapped_column(String(20), nullable=False)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     media_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     media_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    status: Mapped[str | None] = mapped_column(String(20), nullable=True)    # sent, delivered, read, failed
+    status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     failed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    media_attachments: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    template_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
