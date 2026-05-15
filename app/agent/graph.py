@@ -2,7 +2,7 @@ import logging
 import os
 
 from langchain_aws import ChatBedrock
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
@@ -14,6 +14,45 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 _graph_instance = None
+
+
+def _sanitize_message_window(messages: list) -> list:
+    """Remove corrupt sequences that Bedrock's Converse API rejects.
+
+    Two cases handled:
+    - AIMessage with tool_calls not followed by ToolMessages for every call ID
+      (checkpoint saved after LLM responded but before tools ran / after a crash).
+    - Window starts with a non-HumanMessage (sliding window cut mid-sequence).
+    """
+    # Pass 1: drop AIMessages whose tool_calls lack matching ToolMessages.
+    cleaned: list = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            expected_ids = {tc["id"] for tc in msg.tool_calls}
+            j = i + 1
+            covered: set = set()
+            while j < len(messages) and isinstance(messages[j], ToolMessage):
+                covered.add(messages[j].tool_call_id)
+                j += 1
+            if expected_ids.issubset(covered):
+                cleaned.extend(messages[i:j])
+            else:
+                logger.warning(
+                    "Dropping dangling tool call(s) %s from message window",
+                    expected_ids - covered,
+                )
+            i = j
+        else:
+            cleaned.append(msg)
+            i += 1
+
+    # Pass 2: trim leading messages until we reach the first HumanMessage.
+    while cleaned and not isinstance(cleaned[0], HumanMessage):
+        cleaned.pop(0)
+
+    return cleaned
 
 
 def _build_checkpointer():
@@ -85,7 +124,9 @@ def build_graph(checkpointer=None):
 
     def _agent_node(state: AgentState) -> dict:
         system_msg = SystemMessage(content=load_active_prompt())
-        messages = list(state["messages"])[-_CTX_WINDOW:]
+        messages = _sanitize_message_window(list(state["messages"])[-_CTX_WINDOW:])
+        if not messages:
+            raise ValueError("No valid messages to send to LLM after sanitizing window")
         response = llm_with_tools.invoke([system_msg] + messages)
         logger.debug("Agent response: tool_calls=%r", getattr(response, "tool_calls", []))
         return {"messages": [response]}
