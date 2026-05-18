@@ -43,11 +43,19 @@ class InboundMessage(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class StatusError(BaseModel):
+    code: int | None = None
+    title: str | None = None
+    message: str | None = None
+    error_data: dict | None = None
+
+
 class StatusUpdate(BaseModel):
     id: str  # wamid of the original outbound message
     status: Literal["sent", "delivered", "read", "failed"]
     timestamp: str
     recipient_id: str
+    errors: list[StatusError] = []
 
 
 class ChangeValue(BaseModel):

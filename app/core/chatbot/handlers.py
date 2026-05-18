@@ -162,7 +162,15 @@ async def _handle_inbound_image(
 
 
 async def _handle_status_update(status: StatusUpdate, metadata: PhoneMetadata) -> None:
-    logger.info("[handler] status wamid=%s status=%s", status.id, status.status)
+    logger.info("[handler] status wamid=%s status=%s recipient=%s", status.id, status.status, status.recipient_id)
+    if status.status == "failed":
+        for err in status.errors:
+            logger.warning(
+                "[handler] delivery failure wamid=%s code=%s title=%r message=%r data=%s",
+                status.id, err.code, err.title, err.message, err.error_data,
+            )
+        if not status.errors:
+            logger.warning("[handler] delivery failure wamid=%s — no error details provided by Meta", status.id)
     try:
         from app.core.db.engine import get_db
         from app.core.db.repositories import message_repo
