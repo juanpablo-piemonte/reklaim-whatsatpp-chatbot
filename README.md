@@ -82,7 +82,6 @@ Meta webhook → POST /webhooks/whatsapp (HMAC-SHA256 verified)
 | `app/core/api/` | FastAPI routes (`/webhooks`, `/chat`, `/health`) |
 | `app/core/chatbot/` | Orchestration: handlers, mapper, session |
 | `app/core/db/` | SQLAlchemy models, engine, repositories |
-| `app/core/clients/` | Reklaim Rails monolith HTTP client |
 
 **Conversation memory:** `ShallowPyMySQLSaver` — one checkpoint row per dealer (phone number), updated in place on every turn. Survives deploys and multi-worker ECS. Context window: last 20 messages sent to the LLM.
 
@@ -118,7 +117,6 @@ app/
   core/
     api/           FastAPI app, webhook + chat routes, /health
     chatbot/       Handlers, mapper (inbound→agent→outbound), session
-    clients/       Rails monolith HTTP client
     db/            SQLAlchemy models, engine, repositories
     config.py      Pydantic settings (loaded from .env)
     security.py    HMAC-SHA256 signature verification
