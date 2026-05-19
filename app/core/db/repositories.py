@@ -54,6 +54,9 @@ class ConversationRepository:
         db.refresh(conv)
         return conv
 
+    def get_by_id(self, db: Session, conversation_id: int) -> Conversation | None:
+        return db.query(Conversation).filter_by(id=conversation_id).first()
+
 
 class MessageRepository:
     def create(
@@ -116,6 +119,25 @@ class MessageRepository:
         elif status == "failed":
             msg.failed_at = ts
         db.commit()
+
+    def find_by_idempotency_key(
+        self,
+        db: Session,
+        conversation_id: int,
+        idempotency_key: str,
+    ) -> Message | None:
+        """Look up a Message by idempotency_key stored inside raw_payload."""
+        from sqlalchemy import func
+        return (
+            db.query(Message)
+            .filter(Message.conversation_id == conversation_id)
+            .filter(
+                func.json_unquote(
+                    func.json_extract(Message.raw_payload, "$.idempotency_key")
+                ) == idempotency_key
+            )
+            .first()
+        )
 
 
 class AgentRunRepository:
