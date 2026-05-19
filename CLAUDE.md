@@ -33,7 +33,7 @@ This is a WhatsApp AI chatbot for Reklaim car dealers. Meta sends webhook POSTs 
 - `app/agent/graph.py` — LangGraph `StateGraph`; `get_graph()` returns a compiled agent (cached module-level)
 - `app/agent/state.py` — `AgentState` TypedDict: `messages`, `dealer_phone`, `stage`, `metadata`
 - `app/agent/tools/` — LangChain tools; add new tools here and register them in `__init__.py` (`ALL_TOOLS`)
-- `app/agent/prompts.py` — `load_active_prompt()` returns system prompt (hardcoded; TODO: fetch from Rails)
+- `app/agent/prompts.py` — `load_active_prompt(name="default")` fetches the active prompt from Rails (`GET /dealers_chatbot/prompts/:name`) with a 5-minute TTL cache and a hardcoded fallback
 - `app/db/` — SQLAlchemy models (`Conversation`, `Message`) and MySQL engine; **defined but not yet wired into the agent** — conversation state is currently in-memory via `MemorySaver`
 - `app/core/config.py` — Pydantic `Settings` loaded from `.env`
 
@@ -59,5 +59,4 @@ Tests use `unittest.mock.patch` to mock Bedrock (no real AWS calls). WhatsApp se
 
 ## Active TODOs in Code
 
-- `prompts.py` — `load_active_prompt()` should fetch named prompts from the Rails monolith instead of being hardcoded
 - `app/db/` models are ready but not integrated — the agent still uses `MemorySaver`; MySQL checkpointer integration is pending
