@@ -136,3 +136,53 @@ async def test_handle_status_db_error_does_not_raise():
     event = _make_status_event()
     with patch("app.core.db.engine.get_db", side_effect=Exception("connection error")):
         await handle_status_event(event)  # must not raise
+
+
+async def test_handle_status_notifies_be_with_ref_id():
+    event = _make_status_event(status="delivered", wamid="wamid.out.123")
+    fake_msg = MagicMock()
+    fake_msg.raw_payload = {"ref": {"type": "outbound_message", "id": 42}}
+    fake_query = MagicMock()
+    fake_query.filter_by.return_value.first.return_value = fake_msg
+    fake_db = MagicMock()
+    fake_db.query.return_value = fake_query
+
+    mock_patch = AsyncMock()
+    mock_patch.return_value = MagicMock(is_success=True, status_code=200, text="ok")
+    mock_client_ctx = MagicMock()
+    mock_client_ctx.__aenter__ = AsyncMock(return_value=MagicMock(patch=mock_patch))
+    mock_client_ctx.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.core.db.engine.get_db", return_value=iter([fake_db])), \
+         patch("app.core.db.repositories.message_repo") as msg_repo, \
+         patch("httpx.AsyncClient", return_value=mock_client_ctx):
+        await handle_status_event(event)
+
+    msg_repo.update_status.assert_called_once()
+    mock_patch.assert_called_once()
+    url_arg = mock_patch.call_args.args[0]
+    assert url_arg.endswith("/dealers_chatbot/outbound_messages/42/status")
+    json_arg = mock_patch.call_args.kwargs["json"]
+    assert json_arg["status"] == "delivered"
+
+
+async def test_handle_status_skips_be_call_when_no_ref():
+    event = _make_status_event(status="delivered", wamid="wamid.no.ref")
+    fake_msg = MagicMock()
+    fake_msg.raw_payload = {}  # no ref
+    fake_query = MagicMock()
+    fake_query.filter_by.return_value.first.return_value = fake_msg
+    fake_db = MagicMock()
+    fake_db.query.return_value = fake_query
+
+    mock_patch = AsyncMock()
+    mock_client_ctx = MagicMock()
+    mock_client_ctx.__aenter__ = AsyncMock(return_value=MagicMock(patch=mock_patch))
+    mock_client_ctx.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.core.db.engine.get_db", return_value=iter([fake_db])), \
+         patch("app.core.db.repositories.message_repo"), \
+         patch("httpx.AsyncClient", return_value=mock_client_ctx):
+        await handle_status_event(event)
+
+    mock_patch.assert_not_called()

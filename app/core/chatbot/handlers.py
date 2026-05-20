@@ -171,15 +171,67 @@ async def _handle_status_update(status: StatusUpdate, metadata: PhoneMetadata) -
             )
         if not status.errors:
             logger.warning("[handler] delivery failure wamid=%s — no error details provided by Meta", status.id)
+    outbound_message_id: int | None = None
+    error_message: str | None = None
+    if status.errors:
+        err = status.errors[0]
+        error_message = f"meta error {err.code}: {err.message or err.title}".strip()
     try:
         from app.core.db.engine import get_db
         from app.core.db.repositories import message_repo
         db = next(get_db())
         message_repo.update_status(db, status.id, status.status, status.timestamp)
+        outbound_message_id = _find_ref_id(db, status.id)
     except RuntimeError:
         pass
     except Exception as exc:
         logger.warning("[handler] DB error updating status: %s", exc)
+
+    if outbound_message_id is not None:
+        await _notify_be_status(outbound_message_id, status.status, error_message)
+
+
+def _find_ref_id(db, wamid: str) -> int | None:
+    """Look up the BE outbound_message_id stored in raw_payload.ref.id for this wamid."""
+    from app.core.db.models import Message
+    msg = db.query(Message).filter_by(wamid=wamid, direction="outbound").first()
+    if not msg or not msg.raw_payload:
+        return None
+    ref = msg.raw_payload.get("ref") or {}
+    if ref.get("type") == "outbound_message" and isinstance(ref.get("id"), int):
+        return ref["id"]
+    return None
+
+
+async def _notify_be_status(outbound_message_id: int, status: str, error_message: str | None) -> None:
+    """Best-effort PATCH to BE so the OutboundMessage row reflects meta's delivery state."""
+    import httpx
+    url = f"{settings.reklaim_api_url}/dealers_chatbot/outbound_messages/{outbound_message_id}/status"
+    payload: dict = {"status": status}
+    if error_message:
+        payload["error_message"] = error_message
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.patch(
+                url,
+                json=payload,
+                headers={"Authorization": f"Bearer {settings.dealers_chatbot_api_key}"},
+            )
+        if resp.is_success:
+            logger.info(
+                "[handler] notified BE outbound_message_id=%s status=%s",
+                outbound_message_id, status,
+            )
+        else:
+            logger.warning(
+                "[handler] BE status update returned %s for id=%s: %s",
+                resp.status_code, outbound_message_id, resp.text,
+            )
+    except Exception as exc:
+        logger.warning(
+            "[handler] failed to notify BE of status update id=%s: %s",
+            outbound_message_id, exc,
+        )
 
 
 def _invoke_agent(from_phone: str, agent_input: dict) -> tuple[dict, int, str | None]:
