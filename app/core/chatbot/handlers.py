@@ -3,6 +3,7 @@ import time
 
 from app.core.chatbot.mapper import extract_usage, to_agent_input, to_outbound_message
 from app.core.chatbot.session import get_or_create_conversation
+from app.core.clients.monolith import monolith_client
 from app.core.config import settings
 from app.whatsapp.models import Contact, InboundMessage, OutboundText, PhoneMetadata, StatusUpdate
 from app.whatsapp.parser import MessageEvent, StatusEvent
@@ -49,6 +50,18 @@ async def _handle_inbound_text(
         )
         if inbound_msg is None:
             logger.info("[handler] duplicate wamid=%s — skipping", message.id)
+            return
+
+        # Reviewer takeover short-circuit. When a human reviewer holds this
+        # conversation, the agent must stay paused and Rails should notify
+        # the reviewer instead. We've already persisted the inbound row
+        # above, so the transcript stays current either way.
+        if _is_under_takeover(db, conv.id):
+            _notify_takeover(
+                conversation_id=conv.id,
+                wamid=message.id,
+                body_preview=message.text.body if message.text else "",
+            )
             return
 
     agent_input = to_agent_input(message, contact)
@@ -124,6 +137,16 @@ async def _handle_inbound_image(
         )
         if inbound_msg is None:
             logger.info("[handler] duplicate wamid=%s — skipping", message.id)
+            return
+
+        # See `_handle_inbound_text` for rationale. Body preview falls back
+        # to a placeholder since images don't carry text.
+        if _is_under_takeover(db, conv.id):
+            _notify_takeover(
+                conversation_id=conv.id,
+                wamid=message.id,
+                body_preview="[image]",
+            )
             return
 
     agent_input = to_agent_input(message, contact)
@@ -214,3 +237,29 @@ def _persist_agent_run(db, conversation_id: int, wamid: str, latency_ms: int, re
         )
     except Exception as exc:
         logger.warning("[handler] failed to persist agent run: %s", exc)
+
+
+def _is_under_takeover(db, conversation_id: int) -> bool:
+    """Wrapper around the repository so test doubles can patch one place.
+
+    DB errors here must not break the inbound flow — fall through to
+    'not under takeover' (i.e. let the agent reply) rather than 500.
+    """
+    try:
+        from app.core.db.repositories import conversation_repo
+        return conversation_repo.is_under_takeover(db, conversation_id)
+    except Exception as exc:
+        logger.warning("[handler] takeover check failed conversation=%s: %s", conversation_id, exc)
+        return False
+
+
+def _notify_takeover(conversation_id: int, wamid: str, body_preview: str) -> None:
+    """Best-effort fan-out to Rails. Failures are logged, never raised."""
+    try:
+        monolith_client.notify_dealer_message_during_takeover(
+            conversation_id=conversation_id,
+            wamid=wamid,
+            body_preview=(body_preview or "")[:200],
+        )
+    except Exception as exc:
+        logger.warning("[handler] dealer_message notify failed conversation=%s: %s", conversation_id, exc)
