@@ -31,9 +31,6 @@ class Settings(BaseSettings):
     reklaim_api_url: str = "http://localhost:5001"
     dealers_chatbot_api_key: str = "dev-chatbot-key"
 
-    # Token Rails passes via X-Internal-Token when calling /internal/* on the chatbot.
-    chatbot_internal_token: str = "dev-internal-token"
-
     aws_region: str = "us-east-1"
     bedrock_model_id: str = "us.amazon.nova-pro-v1:0"
 
