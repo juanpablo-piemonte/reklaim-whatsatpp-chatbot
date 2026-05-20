@@ -88,6 +88,32 @@ async def test_campaign_first_touch_creates_conversation(async_client, mock_db, 
                                     json={"body": "Hi!", "sender": {"type": "campaign", "campaign_id": 99}, "dealer_phone": "+15551112222"})
     assert resp.status_code == 200
     mock_db["conv_repo"].get_or_create.assert_called_once()
+    kwargs = mock_db["conv_repo"].get_or_create.call_args.kwargs
+    assert kwargs["campaign_id"] == 99, "sender.campaign_id must flow through to conversation row"
+
+
+@pytest.mark.asyncio
+async def test_campaign_first_touch_persists_dealer_id_when_provided(async_client, mock_db, mock_whatsapp_send):
+    resp = await async_client.post("/internal/outbound", headers=HEADERS_OK,
+                                    json={
+                                        "body": "Hi!",
+                                        "sender": {"type": "campaign", "campaign_id": 99},
+                                        "dealer_phone": "+15551112222",
+                                        "dealer_id": 42,
+                                    })
+    assert resp.status_code == 200
+    kwargs = mock_db["conv_repo"].get_or_create.call_args.kwargs
+    assert kwargs["dealer_id"] == 42
+    assert kwargs["campaign_id"] == 99
+
+
+@pytest.mark.asyncio
+async def test_reviewer_reply_does_not_set_campaign_id_on_conversation(async_client, mock_db, mock_whatsapp_send):
+    # Reviewer dispatch uses conversation_id, so get_by_id is used (not get_or_create).
+    resp = await async_client.post("/internal/outbound", headers=HEADERS_OK,
+                                    json={"body": "thanks", "sender": {"type": "reviewer", "reviewer_id": 1}, "conversation_id": 7})
+    assert resp.status_code == 200
+    mock_db["conv_repo"].get_or_create.assert_not_called()
 
 
 @pytest.mark.asyncio

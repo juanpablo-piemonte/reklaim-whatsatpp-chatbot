@@ -62,6 +62,7 @@ class OutboundRequest(BaseModel):
     sender: SenderInfo
     conversation_id: Optional[int] = None
     dealer_phone: Optional[str] = None
+    dealer_id: Optional[int] = None
     template_id: Optional[int] = None
     template: Optional[TemplatePayload] = None
     ref: Optional[RefInfo] = None
@@ -94,6 +95,8 @@ async def post_outbound(payload: OutboundRequest):
             db,
             phone_number_id=settings.whatsapp_phone_number_id,
             from_phone=payload.dealer_phone,
+            dealer_id=payload.dealer_id,
+            campaign_id=payload.sender.campaign_id,
         )
 
     if payload.idempotency_key:

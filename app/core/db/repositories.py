@@ -26,6 +26,8 @@ class ConversationRepository:
         phone_number_id: str,
         from_phone: str,
         contact_name: str | None = None,
+        dealer_id: int | None = None,
+        campaign_id: int | None = None,
     ) -> Conversation:
         conv = (
             db.query(Conversation)
@@ -37,6 +39,13 @@ class ConversationRepository:
             conv.updated_at = _now()
             if contact_name and conv.contact_name != contact_name:
                 conv.contact_name = contact_name
+            # Backfill target ids when previously unset — keeps existing values
+            # intact so an organic conversation that later receives a campaign
+            # send still gets attributed.
+            if dealer_id is not None and conv.dealer_id is None:
+                conv.dealer_id = dealer_id
+            if campaign_id is not None and conv.campaign_id is None:
+                conv.campaign_id = campaign_id
             db.commit()
             return conv
 
@@ -45,6 +54,8 @@ class ConversationRepository:
             phone_number_id=phone_number_id,
             from_phone=from_phone,
             contact_name=contact_name,
+            dealer_id=dealer_id,
+            campaign_id=campaign_id,
             customer_window_expires_at=_window_expires_at(),
             created_at=now,
             updated_at=now,
