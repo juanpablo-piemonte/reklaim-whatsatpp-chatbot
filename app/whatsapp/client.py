@@ -3,7 +3,13 @@ import logging
 import httpx
 
 from app.core.config import settings
-from app.whatsapp.models import AnyOutboundMessage, OutboundImage, OutboundText, SendResult
+from app.whatsapp.models import (
+    AnyOutboundMessage,
+    OutboundImage,
+    OutboundTemplate,
+    OutboundText,
+    SendResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +35,8 @@ class WhatsAppClient:
             return self._send_text(msg)
         if isinstance(msg, OutboundImage):
             return self._send_image(msg)
+        if isinstance(msg, OutboundTemplate):
+            return self._send_template(msg)
         raise ValueError(f"Unsupported outbound message type: {type(msg)}")
 
     def mark_as_read(self, wamid: str) -> None:
@@ -69,6 +77,22 @@ class WhatsAppClient:
             "to": msg.to,
             "type": "text",
             "text": {"body": msg.body, "preview_url": msg.preview_url},
+        }
+        return self._post_message(msg.to, payload)
+
+    def _send_template(self, msg: OutboundTemplate) -> SendResult:
+        template_payload: dict = {
+            "name": msg.name,
+            "language": {"code": msg.language.code},
+        }
+        if msg.components:
+            template_payload["components"] = [c.model_dump() for c in msg.components]
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": msg.to,
+            "type": "template",
+            "template": template_payload,
         }
         return self._post_message(msg.to, payload)
 

@@ -111,7 +111,7 @@ async def test_idempotency_returns_existing_without_resend(async_client, mock_db
 
 
 @pytest.mark.asyncio
-async def test_template_id_warns_and_sends_as_text(async_client, mock_db, mock_whatsapp_send, caplog):
+async def test_template_id_without_payload_warns_and_sends_as_text(async_client, mock_db, mock_whatsapp_send, caplog):
     import logging
     caplog.set_level(logging.WARNING)
     resp = await async_client.post("/internal/outbound", headers=HEADERS_OK,
@@ -119,3 +119,65 @@ async def test_template_id_warns_and_sends_as_text(async_client, mock_db, mock_w
     assert resp.status_code == 200
     assert any("template_id" in rec.message for rec in caplog.records)
     mock_whatsapp_send.send.assert_called_once()
+    from app.whatsapp.models import OutboundText
+    sent = mock_whatsapp_send.send.call_args[0][0]
+    assert isinstance(sent, OutboundText)
+
+
+@pytest.mark.asyncio
+async def test_template_payload_sends_as_template(async_client, mock_db, mock_whatsapp_send):
+    from app.whatsapp.models import OutboundTemplate
+    resp = await async_client.post("/internal/outbound", headers=HEADERS_OK,
+                                    json={
+                                        "body": "Hi {{1}}",  # fallback only; not used when template present
+                                        "sender": {"type": "campaign", "campaign_id": 99},
+                                        "dealer_phone": "+15551112222",
+                                        "template_id": 5,
+                                        "template": {
+                                            "name": "hello_world",
+                                            "language": "en_US",
+                                            "components": [],
+                                        },
+                                    })
+    assert resp.status_code == 200
+    sent = mock_whatsapp_send.send.call_args[0][0]
+    assert isinstance(sent, OutboundTemplate)
+    assert sent.name == "hello_world"
+    assert sent.language.code == "en_US"
+    assert sent.components == []
+    mock_db["msg_repo"].create.assert_called_once()
+    assert mock_db["msg_repo"].create.call_args.kwargs["message_type"] == "template"
+
+
+@pytest.mark.asyncio
+async def test_template_with_body_parameters(async_client, mock_db, mock_whatsapp_send):
+    from app.whatsapp.models import OutboundTemplate
+    resp = await async_client.post("/internal/outbound", headers=HEADERS_OK,
+                                    json={
+                                        "body": "Hi Juanpi, looking for rolex submariner within $1k-$5k",
+                                        "sender": {"type": "campaign", "campaign_id": 99},
+                                        "dealer_phone": "+15551112222",
+                                        "template_id": 5,
+                                        "template": {
+                                            "name": "campaign_dealer_intro_v1",
+                                            "language": "en_US",
+                                            "components": [
+                                                {
+                                                    "type": "body",
+                                                    "parameters": [
+                                                        {"type": "text", "text": "Juanpi"},
+                                                        {"type": "text", "text": "rolex submariner"},
+                                                        {"type": "text", "text": "$1k-$5k"},
+                                                    ],
+                                                }
+                                            ],
+                                        },
+                                    })
+    assert resp.status_code == 200
+    sent = mock_whatsapp_send.send.call_args[0][0]
+    assert isinstance(sent, OutboundTemplate)
+    assert sent.name == "campaign_dealer_intro_v1"
+    assert len(sent.components) == 1
+    assert sent.components[0].type == "body"
+    assert len(sent.components[0].parameters) == 3
+    assert sent.components[0].parameters[1].text == "rolex submariner"
