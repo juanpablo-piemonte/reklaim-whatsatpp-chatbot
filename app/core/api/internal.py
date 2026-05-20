@@ -1,22 +1,19 @@
 """Service-to-service endpoints called by the Rails monolith.
 
-- POST /internal/outbound — campaign + reviewer sends (X-Internal-Token).
-- POST /internal/conversations/{id}/messages — Epic 4 reviewer dashboard
-  replies via ChatbotClient (X-API-Key).
+POST /internal/outbound — campaign and reviewer sends (X-Internal-Token).
+Reviewer dashboard replies use sender.type == "reviewer" on this same route.
 """
 
 import logging
 import secrets
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.db.engine import get_db
 from app.core.db.repositories import conversation_repo, message_repo
-from app.core.security import require_api_key
 from app.whatsapp.client import whatsapp_client
 from app.whatsapp.models import OutboundText
 
@@ -163,88 +160,3 @@ async def post_outbound(
         conversation_id=conv.id,
         status="sent",
     )
-
-
-# ---------------------------------------------------------------------------
-# POST /internal/conversations/{id}/messages — Epic 4 dashboard reviewer reply
-# ---------------------------------------------------------------------------
-
-class ReviewerReplyRequest(BaseModel):
-    body: str = Field(..., min_length=1, description="Reviewer-typed reply body.")
-    reviewer_account_id: int | None = Field(
-        default=None,
-        description="Rails account id of the reviewer, stashed in raw_payload for audit.",
-    )
-
-
-class ReviewerReplyResponse(BaseModel):
-    provider_message_id: str | None
-    status: str
-
-
-@router.post(
-    "/conversations/{conversation_id}/messages",
-    dependencies=[Depends(require_api_key)],
-    response_model=ReviewerReplyResponse,
-)
-def create_reviewer_message(
-    payload: ReviewerReplyRequest,
-    conversation_id: int = Path(..., ge=1),
-    db: Session = Depends(get_db),
-) -> ReviewerReplyResponse:
-    """Send a reviewer-typed reply via Meta WhatsApp and persist the outbound row.
-
-    Called by Rails `ChatbotClient` when a reviewer hits Send in the dashboard.
-    """
-    conv = conversation_repo.get_by_id(db, conversation_id)
-    if conv is None:
-        raise HTTPException(status_code=404, detail="conversation not found")
-
-    body = payload.body.strip()
-    if not body:
-        raise HTTPException(status_code=422, detail="body cannot be blank")
-
-    try:
-        send_result = whatsapp_client.send(OutboundText(to=conv.from_phone, body=body))
-    except Exception as exc:
-        logger.error(
-            "[internal] WhatsApp send failed conversation=%s reviewer=%s: %s",
-            conversation_id,
-            payload.reviewer_account_id,
-            exc,
-        )
-        raise HTTPException(status_code=502, detail="whatsapp send failed") from exc
-
-    provider_wamid = send_result.wamid
-    if not provider_wamid:
-        logger.error(
-            "[internal] WhatsApp send returned no wamid conversation=%s body=%r",
-            conversation_id,
-            body[:80],
-        )
-        raise HTTPException(status_code=502, detail="whatsapp send returned no message id")
-
-    raw_payload = {
-        "sender_type": "reviewer",
-        "source": "rails_internal_api",
-    }
-    if payload.reviewer_account_id is not None:
-        raw_payload["reviewer_account_id"] = payload.reviewer_account_id
-
-    persisted = message_repo.create(
-        db,
-        conversation_id=conv.id,
-        wamid=provider_wamid,
-        message_type="text",
-        direction="outbound",
-        body=body,
-        raw_payload=raw_payload,
-    )
-    if persisted is None:
-        logger.info(
-            "[internal] duplicate wamid on reviewer reply conversation=%s wamid=%s",
-            conversation_id,
-            provider_wamid,
-        )
-
-    return ReviewerReplyResponse(provider_message_id=provider_wamid, status="sent")
