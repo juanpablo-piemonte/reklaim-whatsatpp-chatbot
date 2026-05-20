@@ -1,13 +1,13 @@
 import logging
-import secrets
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
 from app.core.config import settings
 from app.core.db.engine import get_db
 from app.core.db.repositories import conversation_repo, message_repo
+from app.core.security import require_api_key
 from app.whatsapp.client import whatsapp_client
 from app.whatsapp.models import OutboundText
 
@@ -58,18 +58,8 @@ class OutboundResponse(BaseModel):
     status: Literal["sent"]
 
 
-def _require_internal_token(request: Request) -> None:
-    presented = request.headers.get("X-Internal-Token", "")
-    expected = settings.chatbot_internal_token or ""
-    if not presented or not expected or not secrets.compare_digest(presented.encode(), expected.encode()):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or missing X-Internal-Token")
-
-
-@router.post("/outbound", response_model=OutboundResponse)
-async def post_outbound(
-    payload: OutboundRequest,
-    _: None = Depends(_require_internal_token),
-):
+@router.post("/outbound", response_model=OutboundResponse, dependencies=[Depends(require_api_key)])
+async def post_outbound(payload: OutboundRequest):
     db = next(get_db())
 
     if payload.conversation_id is not None:
