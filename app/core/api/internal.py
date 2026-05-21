@@ -1,7 +1,7 @@
 """Service-to-service endpoints called by the Rails monolith.
 
-POST /internal/outbound — campaign and reviewer sends (X-Internal-Token).
-Reviewer dashboard replies use sender.type == "reviewer" on this same route.
+POST /internal/outbound — campaign and reviewer sends.
+Auth: X-API-Key (DEALERS_CHATBOT_API_KEY) or X-Internal-Token (CHATBOT_INTERNAL_TOKEN).
 """
 
 import logging
@@ -22,21 +22,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _require_internal_token(request: Request) -> None:
+def _require_outbound_auth(request: Request) -> None:
+    """Accept either auth header so campaign (internal token) and dev (API key) both work."""
+    api_key = request.headers.get("X-API-Key", "")
+    expected_key = settings.dealers_chatbot_api_key or ""
+    if (
+        api_key
+        and expected_key
+        and secrets.compare_digest(api_key.encode(), expected_key.encode())
+    ):
+        return
+
     presented = request.headers.get("X-Internal-Token", "")
     expected = settings.chatbot_internal_token or ""
-    if not presented or not expected or not secrets.compare_digest(
-        presented.encode(), expected.encode()
+    if (
+        presented
+        and expected
+        and secrets.compare_digest(presented.encode(), expected.encode())
     ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid or missing X-Internal-Token",
-        )
+        return
 
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="invalid or missing X-API-Key / X-Internal-Token",
+    )
 
-# ---------------------------------------------------------------------------
-# POST /internal/outbound — campaigns + unified reviewer sends
-# ---------------------------------------------------------------------------
 
 class SenderInfo(BaseModel):
     type: Literal["reviewer", "campaign"]
@@ -83,7 +93,7 @@ class OutboundResponse(BaseModel):
 @router.post("/outbound", response_model=OutboundResponse)
 async def post_outbound(
     payload: OutboundRequest,
-    _: None = Depends(_require_internal_token),
+    _: None = Depends(_require_outbound_auth),
 ):
     db = next(get_db())
 
