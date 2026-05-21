@@ -1,19 +1,51 @@
+"""Service-to-service endpoints called by the Rails monolith.
+
+POST /internal/outbound — campaign and reviewer sends.
+Auth: X-API-Key (DEALERS_CHATBOT_API_KEY) or X-Internal-Token (CHATBOT_INTERNAL_TOKEN).
+"""
+
 import logging
+import secrets
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, model_validator
 
 from app.core.config import settings
 from app.core.db.engine import get_db
 from app.core.db.repositories import conversation_repo, message_repo
-from app.core.security import require_api_key
 from app.whatsapp.client import whatsapp_client
 from app.whatsapp.models import OutboundText
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _require_outbound_auth(request: Request) -> None:
+    """Accept either auth header so campaign (internal token) and dev (API key) both work."""
+    api_key = request.headers.get("X-API-Key", "")
+    expected_key = settings.dealers_chatbot_api_key or ""
+    if (
+        api_key
+        and expected_key
+        and secrets.compare_digest(api_key.encode(), expected_key.encode())
+    ):
+        return
+
+    presented = request.headers.get("X-Internal-Token", "")
+    expected = settings.chatbot_internal_token or ""
+    if (
+        presented
+        and expected
+        and secrets.compare_digest(presented.encode(), expected.encode())
+    ):
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="invalid or missing X-API-Key / X-Internal-Token",
+    )
 
 
 class SenderInfo(BaseModel):
@@ -58,14 +90,20 @@ class OutboundResponse(BaseModel):
     status: Literal["sent"]
 
 
-@router.post("/outbound", response_model=OutboundResponse, dependencies=[Depends(require_api_key)])
-async def post_outbound(payload: OutboundRequest):
+@router.post("/outbound", response_model=OutboundResponse)
+async def post_outbound(
+    payload: OutboundRequest,
+    _: None = Depends(_require_outbound_auth),
+):
     db = next(get_db())
 
     if payload.conversation_id is not None:
         conv = conversation_repo.get_by_id(db, payload.conversation_id)
         if conv is None:
-            raise HTTPException(status_code=422, detail=f"conversation {payload.conversation_id} not found")
+            raise HTTPException(
+                status_code=422,
+                detail=f"conversation {payload.conversation_id} not found",
+            )
     else:
         conv = conversation_repo.get_or_create(
             db,
@@ -74,7 +112,9 @@ async def post_outbound(payload: OutboundRequest):
         )
 
     if payload.idempotency_key:
-        existing = message_repo.find_by_idempotency_key(db, conv.id, payload.idempotency_key)
+        existing = message_repo.find_by_idempotency_key(
+            db, conv.id, payload.idempotency_key
+        )
         if existing is not None:
             return OutboundResponse(
                 message_id=existing.id,
@@ -94,7 +134,9 @@ async def post_outbound(payload: OutboundRequest):
     try:
         send_result = whatsapp_client.send(OutboundText(to=dealer_phone, body=payload.body))
     except Exception as exc:
-        logger.exception("[internal/outbound] meta send failed conversation_id=%s: %s", conv.id, exc)
+        logger.exception(
+            "[internal/outbound] meta send failed conversation_id=%s: %s", conv.id, exc
+        )
         raise HTTPException(status_code=502, detail=f"meta send failed: {exc}")
 
     raw_payload = {
@@ -115,8 +157,11 @@ async def post_outbound(payload: OutboundRequest):
         raw_payload=raw_payload,
     )
     if msg is None:
-        logger.warning("[internal/outbound] duplicate wamid=%s on insert; rare", send_result.wamid)
+        logger.warning(
+            "[internal/outbound] duplicate wamid=%s on insert; rare", send_result.wamid
+        )
         from app.core.db.models import Message
+
         msg = db.query(Message).filter_by(wamid=send_result.wamid).first()
 
     return OutboundResponse(

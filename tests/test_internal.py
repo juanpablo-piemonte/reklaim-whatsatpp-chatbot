@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.whatsapp.models import SendResult
 
 
-API_KEY = "test-api-key"
+TOKEN = "test-internal-token"
 
 
 def _send_result(wamid: str) -> SendResult:
@@ -19,8 +19,8 @@ def _send_result(wamid: str) -> SendResult:
 
 
 @pytest.fixture(autouse=True)
-def patch_api_key():
-    with patch.object(settings, "dealers_chatbot_api_key", API_KEY), \
+def patch_internal_token():
+    with patch.object(settings, "chatbot_internal_token", TOKEN), \
          patch.object(settings, "whatsapp_phone_number_id", "test-phone-num-id"):
         yield
 
@@ -48,20 +48,20 @@ def mock_db():
         yield {"conv_repo": conv_repo, "msg_repo": msg_repo}
 
 
-HEADERS_OK = {"X-API-Key": API_KEY, "Content-Type": "application/json"}
+HEADERS_OK = {"X-Internal-Token": TOKEN, "Content-Type": "application/json"}
 
 
 @pytest.mark.asyncio
-async def test_returns_401_without_api_key(async_client):
+async def test_returns_401_without_token(async_client):
     resp = await async_client.post("/internal/outbound", json={"body": "x", "sender": {"type": "reviewer", "reviewer_id": 1}, "conversation_id": 1})
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_returns_403_with_bad_api_key(async_client):
-    resp = await async_client.post("/internal/outbound", headers={"X-API-Key": "wrong"},
+async def test_returns_401_with_bad_token(async_client):
+    resp = await async_client.post("/internal/outbound", headers={"X-Internal-Token": "wrong"},
                                     json={"body": "x", "sender": {"type": "reviewer", "reviewer_id": 1}, "conversation_id": 1})
-    assert resp.status_code == 403
+    assert resp.status_code == 401
 
 
 @pytest.mark.asyncio

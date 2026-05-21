@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.db.models import AgentRun, Conversation, Message
+from app.core.db.models import AgentRun, Conversation, ConversationStateHistory, Message
 
 _CUSTOMER_WINDOW_HOURS = 24
 
@@ -56,6 +56,32 @@ class ConversationRepository:
 
     def get_by_id(self, db: Session, conversation_id: int) -> Conversation | None:
         return db.query(Conversation).filter_by(id=conversation_id).first()
+
+    def is_under_takeover(self, db: Session, conversation_id: int) -> bool:
+        """Return True iff a human reviewer currently holds this conversation.
+
+        Mirrors `Chatbot::Conversation#under_takeover?` on the Rails side:
+        the conversation must be in `awaiting_human_review` AND the latest
+        state-history row's `to_state` must be `awaiting_human_review` AND
+        `changed_by` must be present (a non-null Rails account id). That
+        last condition is what distinguishes a reviewer-driven takeover
+        from an agent-driven escalation into the same state.
+        """
+        conv = db.query(Conversation).filter_by(id=conversation_id).first()
+        if conv is None or conv.state != "awaiting_human_review":
+            return False
+
+        latest = (
+            db.query(ConversationStateHistory)
+            .filter_by(conversation_id=conversation_id)
+            .order_by(ConversationStateHistory.created_at.desc())
+            .first()
+        )
+        if latest is None:
+            return False
+        if latest.to_state != "awaiting_human_review":
+            return False
+        return latest.changed_by is not None
 
 
 class MessageRepository:
