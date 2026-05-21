@@ -88,6 +88,32 @@ async def test_campaign_first_touch_creates_conversation(async_client, mock_db, 
                                     json={"body": "Hi!", "sender": {"type": "campaign", "campaign_id": 99}, "dealer_phone": "+15551112222"})
     assert resp.status_code == 200
     mock_db["conv_repo"].get_or_create.assert_called_once()
+    kwargs = mock_db["conv_repo"].get_or_create.call_args.kwargs
+    assert kwargs["campaign_id"] == 99, "sender.campaign_id must flow through to conversation row"
+
+
+@pytest.mark.asyncio
+async def test_campaign_first_touch_persists_dealer_id_when_provided(async_client, mock_db, mock_whatsapp_send):
+    resp = await async_client.post("/internal/outbound", headers=HEADERS_OK,
+                                    json={
+                                        "body": "Hi!",
+                                        "sender": {"type": "campaign", "campaign_id": 99},
+                                        "dealer_phone": "+15551112222",
+                                        "dealer_id": 42,
+                                    })
+    assert resp.status_code == 200
+    kwargs = mock_db["conv_repo"].get_or_create.call_args.kwargs
+    assert kwargs["dealer_id"] == 42
+    assert kwargs["campaign_id"] == 99
+
+
+@pytest.mark.asyncio
+async def test_reviewer_reply_does_not_set_campaign_id_on_conversation(async_client, mock_db, mock_whatsapp_send):
+    # Reviewer dispatch uses conversation_id, so get_by_id is used (not get_or_create).
+    resp = await async_client.post("/internal/outbound", headers=HEADERS_OK,
+                                    json={"body": "thanks", "sender": {"type": "reviewer", "reviewer_id": 1}, "conversation_id": 7})
+    assert resp.status_code == 200
+    mock_db["conv_repo"].get_or_create.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -111,7 +137,7 @@ async def test_idempotency_returns_existing_without_resend(async_client, mock_db
 
 
 @pytest.mark.asyncio
-async def test_template_id_warns_and_sends_as_text(async_client, mock_db, mock_whatsapp_send, caplog):
+async def test_template_id_without_payload_warns_and_sends_as_text(async_client, mock_db, mock_whatsapp_send, caplog):
     import logging
     caplog.set_level(logging.WARNING)
     resp = await async_client.post("/internal/outbound", headers=HEADERS_OK,
@@ -119,3 +145,65 @@ async def test_template_id_warns_and_sends_as_text(async_client, mock_db, mock_w
     assert resp.status_code == 200
     assert any("template_id" in rec.message for rec in caplog.records)
     mock_whatsapp_send.send.assert_called_once()
+    from app.whatsapp.models import OutboundText
+    sent = mock_whatsapp_send.send.call_args[0][0]
+    assert isinstance(sent, OutboundText)
+
+
+@pytest.mark.asyncio
+async def test_template_payload_sends_as_template(async_client, mock_db, mock_whatsapp_send):
+    from app.whatsapp.models import OutboundTemplate
+    resp = await async_client.post("/internal/outbound", headers=HEADERS_OK,
+                                    json={
+                                        "body": "Hi {{1}}",  # fallback only; not used when template present
+                                        "sender": {"type": "campaign", "campaign_id": 99},
+                                        "dealer_phone": "+15551112222",
+                                        "template_id": 5,
+                                        "template": {
+                                            "name": "hello_world",
+                                            "language": "en_US",
+                                            "components": [],
+                                        },
+                                    })
+    assert resp.status_code == 200
+    sent = mock_whatsapp_send.send.call_args[0][0]
+    assert isinstance(sent, OutboundTemplate)
+    assert sent.name == "hello_world"
+    assert sent.language.code == "en_US"
+    assert sent.components == []
+    mock_db["msg_repo"].create.assert_called_once()
+    assert mock_db["msg_repo"].create.call_args.kwargs["message_type"] == "template"
+
+
+@pytest.mark.asyncio
+async def test_template_with_body_parameters(async_client, mock_db, mock_whatsapp_send):
+    from app.whatsapp.models import OutboundTemplate
+    resp = await async_client.post("/internal/outbound", headers=HEADERS_OK,
+                                    json={
+                                        "body": "Hi Juanpi, looking for rolex submariner within $1k-$5k",
+                                        "sender": {"type": "campaign", "campaign_id": 99},
+                                        "dealer_phone": "+15551112222",
+                                        "template_id": 5,
+                                        "template": {
+                                            "name": "campaign_dealer_intro_v1",
+                                            "language": "en_US",
+                                            "components": [
+                                                {
+                                                    "type": "body",
+                                                    "parameters": [
+                                                        {"type": "text", "text": "Juanpi"},
+                                                        {"type": "text", "text": "rolex submariner"},
+                                                        {"type": "text", "text": "$1k-$5k"},
+                                                    ],
+                                                }
+                                            ],
+                                        },
+                                    })
+    assert resp.status_code == 200
+    sent = mock_whatsapp_send.send.call_args[0][0]
+    assert isinstance(sent, OutboundTemplate)
+    assert sent.name == "campaign_dealer_intro_v1"
+    assert len(sent.components) == 1
+    assert sent.components[0].type == "body"
+    assert len(sent.components[0].parameters) == 3
+    assert sent.components[0].parameters[1].text == "rolex submariner"

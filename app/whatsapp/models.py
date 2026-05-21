@@ -98,7 +98,29 @@ class OutboundImage(BaseModel):
     caption: str | None = None
 
 
-AnyOutboundMessage = OutboundText | OutboundImage
+class TemplateLanguage(BaseModel):
+    code: str  # e.g. "en_US"
+
+
+class TemplateParameter(BaseModel):
+    type: Literal["text"] = "text"
+    text: str
+
+
+class TemplateComponent(BaseModel):
+    type: Literal["body", "header"]
+    parameters: list[TemplateParameter] = []
+
+
+class OutboundTemplate(BaseModel):
+    type: Literal["template"] = "template"
+    to: str
+    name: str
+    language: TemplateLanguage
+    components: list[TemplateComponent] = []
+
+
+AnyOutboundMessage = OutboundText | OutboundImage | OutboundTemplate
 
 
 class SendResult(BaseModel):

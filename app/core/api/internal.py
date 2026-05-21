@@ -15,7 +15,13 @@ from app.core.config import settings
 from app.core.db.engine import get_db
 from app.core.db.repositories import conversation_repo, message_repo
 from app.whatsapp.client import whatsapp_client
-from app.whatsapp.models import OutboundText
+from app.whatsapp.models import (
+    OutboundTemplate,
+    OutboundText,
+    TemplateComponent,
+    TemplateLanguage,
+    TemplateParameter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +73,30 @@ class RefInfo(BaseModel):
     id: int
 
 
+class TemplateParamPayload(BaseModel):
+    type: Literal["text"] = "text"
+    text: str
+
+
+class TemplateComponentPayload(BaseModel):
+    type: Literal["body", "header"]
+    parameters: list[TemplateParamPayload] = []
+
+
+class TemplatePayload(BaseModel):
+    name: str
+    language: str  # e.g. "en_US"
+    components: list[TemplateComponentPayload] = []
+
+
 class OutboundRequest(BaseModel):
     body: str = Field(min_length=1)
     sender: SenderInfo
     conversation_id: Optional[int] = None
     dealer_phone: Optional[str] = None
+    dealer_id: Optional[int] = None
     template_id: Optional[int] = None
+    template: Optional[TemplatePayload] = None
     ref: Optional[RefInfo] = None
     idempotency_key: Optional[str] = None
 
@@ -109,6 +133,8 @@ async def post_outbound(
             db,
             phone_number_id=settings.whatsapp_phone_number_id,
             from_phone=payload.dealer_phone,
+            dealer_id=payload.dealer_id,
+            campaign_id=payload.sender.campaign_id,
         )
 
     if payload.idempotency_key:
@@ -123,16 +149,33 @@ async def post_outbound(
                 status="sent",
             )
 
-    if payload.template_id is not None:
-        logger.warning(
-            "[internal/outbound] template_id=%s present but Meta template send is deferred; sending as free text",
-            payload.template_id,
-        )
-
     dealer_phone = payload.dealer_phone or conv.from_phone
 
+    if payload.template is not None:
+        outbound = OutboundTemplate(
+            to=dealer_phone,
+            name=payload.template.name,
+            language=TemplateLanguage(code=payload.template.language),
+            components=[
+                TemplateComponent(
+                    type=c.type,
+                    parameters=[TemplateParameter(text=p.text) for p in c.parameters],
+                )
+                for c in payload.template.components
+            ],
+        )
+        message_type = "template"
+    else:
+        if payload.template_id is not None:
+            logger.warning(
+                "[internal/outbound] template_id=%s present but no template payload; sending as free text",
+                payload.template_id,
+            )
+        outbound = OutboundText(to=dealer_phone, body=payload.body)
+        message_type = "text"
+
     try:
-        send_result = whatsapp_client.send(OutboundText(to=dealer_phone, body=payload.body))
+        send_result = whatsapp_client.send(outbound)
     except Exception as exc:
         logger.exception(
             "[internal/outbound] meta send failed conversation_id=%s: %s", conv.id, exc
@@ -151,7 +194,7 @@ async def post_outbound(
         db,
         conversation_id=conv.id,
         wamid=send_result.wamid,
-        message_type="text",
+        message_type=message_type,
         direction="outbound",
         body=payload.body,
         raw_payload=raw_payload,
